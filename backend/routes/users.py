@@ -46,6 +46,7 @@ def create_new_user(
             password=payload.password,
             role=payload.role,
             full_name=payload.full_name,
+            created_by_user_id=current_user.id,
         )
 
         db.commit()
@@ -137,6 +138,7 @@ def update_existing_user(
             role=payload.role,
             full_name=payload.full_name,
             is_active=payload.is_active,
+            updated_by_user_id=current_user.id,
         )
 
         db.commit()
@@ -178,6 +180,7 @@ def reset_user_password(
             db,
             user,
             payload.new_password,
+            reset_by_user_id=current_user.id,
         )
 
         db.commit()

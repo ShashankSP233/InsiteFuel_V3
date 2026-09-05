@@ -17,6 +17,7 @@ from backend.schemas.fuel import (
     ShiftOpenRequest,
     ShiftReportResponse,
     ShiftResponse,
+    OpeningFuelCorrection,
 )
 from backend.services.fuel_service import FuelService
 
@@ -243,19 +244,19 @@ def close_shift(
 )
 def correct_opening(
     shift_id: int,
-    opening_fuel: float,
+    payload: OpeningFuelCorrection,
     db: Session = Depends(db_session),
     current_user: User = Depends(
         require_roles(UserRole.MANAGER)
     ),
 ):
     try:
-        from decimal import Decimal
-
         shift = FuelService.correct_opening_fuel(
             db=db,
             shift_id=shift_id,
-            new_opening_fuel=Decimal(str(opening_fuel)),
+            new_opening_fuel=payload.opening_fuel,
+            corrected_by_user_id=current_user.id,
+            reason=payload.reason,
         )
 
         db.commit()

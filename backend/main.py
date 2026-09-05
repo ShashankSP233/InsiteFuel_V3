@@ -7,6 +7,9 @@ from backend.routes.projects import router as projects_router
 from backend.routes.vessels import router as vessels_router
 from backend.routes.equipment import router as equipment_router
 from backend.routes.fuel import router as fuel_router
+from backend.routes import engine
+from backend.routes.transfer import router as transfer_router
+from backend.routes.audit import router as audit_router
 
 
 app = FastAPI(
@@ -28,6 +31,11 @@ app.include_router(equipment_router)
 
 app.include_router(fuel_router)
 
+app.include_router(engine.router)
+
+app.include_router(transfer_router)
+
+app.include_router(audit_router)
 
 
 @app.get("/api/health")

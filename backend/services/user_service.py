@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 
 from backend.models.user import User, UserRole
 from backend.services.auth_service import hash_password
+from backend.services.audit_service import AuditService
 
-from backend.models.user import User, UserRole
+
 
 
 
@@ -25,6 +26,7 @@ def create_user(
     password: str,
     role: str,
     full_name: str | None = None,
+    created_by_user_id: int | None = None,
 ) -> User:
     username = username.strip()
 
@@ -63,7 +65,21 @@ def create_user(
 
     db.add(user)
     db.flush()
-
+    AuditService.log(
+        db=db,
+        user_id=created_by_user_id,
+        action="CREATE_USER",
+        entity="users",
+        entity_id=user.id,
+        old_values=None,
+        new_values={
+            "username": user.username,
+            "role": user.role,
+            "full_name": user.full_name,
+            "is_active": user.is_active,
+        },
+        details="User account created.",
+    )
     return user
 
 
@@ -82,8 +98,14 @@ def update_user(
     role: str | None = None,
     full_name: str | None = None,
     is_active: bool | None = None,
+    updated_by_user_id: int | None = None,
 ) -> User:
-
+    old_values = {
+        "username": user.username,
+        "role": user.role,
+        "full_name": user.full_name,
+        "is_active": user.is_active,
+    }
     if username is not None:
         username = username.strip()
 
@@ -129,5 +151,21 @@ def update_user(
         user.is_active = is_active
 
     db.flush()
+    new_values = {
+    "username": user.username,
+    "role": user.role,
+    "full_name": user.full_name,
+    "is_active": user.is_active,
+    }
 
+    AuditService.log(
+        db=db,
+        user_id=updated_by_user_id,
+        action="UPDATE_USER",
+        entity="users",
+        entity_id=user.id,
+        old_values=old_values,
+        new_values=new_values,
+        details="User account updated.",
+    )
     return user

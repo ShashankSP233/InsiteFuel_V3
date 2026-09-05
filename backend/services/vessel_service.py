@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.project import Project
 from backend.models.vessel import Vessel
-
+from backend.services.audit_service import AuditService
 
 def get_vessel_by_id(
     db: Session,
@@ -41,6 +41,7 @@ def create_vessel(
     project_id: int,
     name: str,
     code: str | None = None,
+    created_by_user_id: int | None = None,
 ) -> Vessel:
 
     project = db.get(Project, project_id)
@@ -95,6 +96,19 @@ def create_vessel(
     db.add(vessel)
     db.flush()
 
+    AuditService.log(
+        db,
+        user_id=created_by_user_id,
+        action="CREATE_VESSEL",
+        entity="Vessel",
+        entity_id=vessel.id,
+        new_values={
+            "project_id": vessel.project_id,
+            "name": vessel.name,
+            "code": vessel.code,
+            "is_active": vessel.is_active,
+        },
+    )
     return vessel
 
 
@@ -106,6 +120,7 @@ def update_vessel(
     name: str | None = None,
     code: str | None = None,
     is_active: bool | None = None,
+    updated_by_user_id: int | None = None
 ) -> Vessel:
 
     if project_id is not None:
@@ -176,5 +191,18 @@ def update_vessel(
         vessel.is_active = is_active
 
     db.flush()
-
+    AuditService.log(
+        db,
+        user_id=updated_by_user_id,
+        action="UPDATE_VESSEL",
+        entity="Vessel",
+        entity_id=vessel.id,
+        old_values=old_values,
+        new_values={
+            "project_id": vessel.project_id,
+            "name": vessel.name,
+            "code": vessel.code,
+            "is_active": vessel.is_active,
+        },
+    )
     return vessel

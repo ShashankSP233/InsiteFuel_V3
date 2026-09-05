@@ -47,8 +47,20 @@ class FuelTransfer(Base):
         index=True,
     )
 
+    from_shift_id: Mapped[int] = mapped_column(
+        ForeignKey("shifts.id"),
+        nullable=False,
+        index=True,
+    )
+
     to_vessel_id: Mapped[int] = mapped_column(
         ForeignKey("vessels.id"),
+        nullable=False,
+        index=True,
+    )
+
+    to_shift_id: Mapped[int] = mapped_column(
+        ForeignKey("shifts.id"),
         nullable=False,
         index=True,
     )

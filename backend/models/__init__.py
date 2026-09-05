@@ -7,6 +7,8 @@ from backend.models.fuel import FuelTransaction, FuelTransactionType
 from backend.models.engine import EngineEvent
 from backend.models.transfer import FuelTransfer, TransferStatus
 from backend.models.session import Session
+from backend.models.audit_log import AuditLog
+
 
 __all__ = [
     "User",
@@ -19,4 +21,6 @@ __all__ = [
     "EngineEvent",
     "FuelTransfer",
     "TransferStatus",
+    "Session",
+    "AuditLog",
 ]

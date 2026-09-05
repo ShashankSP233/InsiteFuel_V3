@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.equipment import Equipment
 from backend.models.vessel import Vessel
-
+from backend.services.audit_service import AuditService
 
 def get_equipment_by_id(
     db: Session,
@@ -37,13 +37,14 @@ def get_equipment_by_code(
 
 
 def create_equipment(
-    db: Session,
-    vessel_id: int,
-    name: str,
-    equipment_type: str,
-    code: str | None = None,
+    db,
+    vessel_id,
+    name,
+    equipment_type,
+    code=None,
+    created_by_user_id: int | None = None,
 ) -> Equipment:
-
+    
     vessel = db.get(Vessel, vessel_id)
 
     if vessel is None:
@@ -103,7 +104,20 @@ def create_equipment(
 
     db.add(equipment)
     db.flush()
-
+    AuditService.log(
+        db,
+        user_id=created_by_user_id,
+        action="CREATE_EQUIPMENT",
+        entity="Equipment",
+        entity_id=equipment.id,
+        new_values={
+            "vessel_id": equipment.vessel_id,
+            "name": equipment.name,
+            "equipment_type": equipment.equipment_type,
+            "code": equipment.code,
+            "is_active": equipment.is_active,
+        },
+    )
     return equipment
 
 
@@ -116,6 +130,7 @@ def update_equipment(
     equipment_type: str | None = None,
     code: str | None = None,
     is_active: bool | None = None,
+    updated_by_user_id: int | None = None
 ) -> Equipment:
 
     target_vessel_id = (
@@ -123,7 +138,13 @@ def update_equipment(
         if vessel_id is not None
         else equipment.vessel_id
     )
-
+    old_values = {
+        "vessel_id": equipment.vessel_id,
+        "name": equipment.name,
+        "equipment_type": equipment.equipment_type,
+        "code": equipment.code,
+        "is_active": equipment.is_active,
+    }
     if vessel_id is not None:
         vessel = db.get(
             Vessel,
@@ -204,5 +225,19 @@ def update_equipment(
         equipment.is_active = is_active
 
     db.flush()
-
+    AuditService.log(
+        db,
+        user_id=updated_by_user_id,
+        action="UPDATE_EQUIPMENT",
+        entity="Equipment",
+        entity_id=equipment.id,
+        old_values=old_values,
+        new_values={
+            "vessel_id": equipment.vessel_id,
+            "name": equipment.name,
+            "equipment_type": equipment.equipment_type,
+            "code": equipment.code,
+            "is_active": equipment.is_active,
+        },
+    )
     return equipment

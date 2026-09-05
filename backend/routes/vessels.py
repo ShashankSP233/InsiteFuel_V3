@@ -81,6 +81,7 @@ def create_new_vessel(
             project_id=payload.project_id,
             name=payload.name,
             code=payload.code,
+            created_by_user_id=current_user.id
         )
 
         db.commit()
@@ -128,6 +129,7 @@ def update_existing_vessel(
             name=payload.name,
             code=payload.code,
             is_active=payload.is_active,
+            updated_by_user_id=current_user.id
         )
 
         db.commit()

@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.project import Project
-
+from backend.services.audit_service import AuditService
 
 def get_project_by_id(
     db: Session,
@@ -38,6 +38,7 @@ def create_project(
     name: str,
     code: str | None = None,
     description: str | None = None,
+    created_by_user_id: int | None = None,
 ) -> Project:
 
     name = name.strip()
@@ -73,6 +74,22 @@ def create_project(
     db.add(project)
     db.flush()
 
+    AuditService.log(
+        db=db,
+        user_id=created_by_user_id,
+        action="CREATE_PROJECT",
+        entity="projects",
+        entity_id=project.id,
+        old_values=None,
+        new_values={
+            "name": project.name,
+            "code": project.code,
+            "description": project.description,
+            "is_active": project.is_active,
+        },
+        details="Project created.",
+    )
+
     return project
 
 
@@ -84,8 +101,14 @@ def update_project(
     code: str | None = None,
     description: str | None = None,
     is_active: bool | None = None,
+    updated_by_user_id: int | None = None,
 ) -> Project:
-
+    old_values = {
+        "name": project.name,
+        "code": project.code,
+        "description": project.description,
+        "is_active": project.is_active,
+    }
     if name is not None:
         name = name.strip()
 
@@ -132,5 +155,21 @@ def update_project(
         project.is_active = is_active
 
     db.flush()
+    new_values = {
+        "name": project.name,
+        "code": project.code,
+        "description": project.description,
+        "is_active": project.is_active,
+    }
 
+    AuditService.log(
+        db=db,
+        user_id=updated_by_user_id,
+        action="UPDATE_PROJECT",
+        entity="projects",
+        entity_id=project.id,
+        old_values=old_values,
+        new_values=new_values,
+        details="Project updated.",
+    )
     return project

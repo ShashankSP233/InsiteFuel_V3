@@ -10,6 +10,11 @@ class InitialOpeningFuelCreate(BaseModel):
     opening_fuel: Decimal = Field(ge=0)
 
 
+class OpeningFuelCorrection(BaseModel):
+    opening_fuel: Decimal = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class FuelTransactionCreate(BaseModel):
     vessel_id: int
     shift_date: date

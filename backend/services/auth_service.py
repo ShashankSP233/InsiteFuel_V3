@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.session import Session as UserSession
 from backend.models.user import User
-
+from backend.services.audit_service import AuditService
 
 password_hash = PasswordHash.recommended()
 
@@ -97,6 +97,7 @@ def reset_password(
     db: Session,
     user: User,
     new_password: str,
+    reset_by_user_id: int | None = None,
 ) -> None:
     if len(new_password) < 8:
         raise ValueError(
@@ -116,3 +117,16 @@ def reset_password(
         db.delete(user_session)
 
     db.flush()
+    AuditService.log(
+        db=db,
+        user_id=reset_by_user_id,
+        action="RESET_USER_PASSWORD",
+        entity="users",
+        entity_id=user.id,
+        old_values=None,
+        new_values={
+            "password_reset": True,
+            "active_sessions_revoked": True,
+        },
+        details="User password reset and existing sessions revoked.",
+    )

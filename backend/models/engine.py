@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import ForeignKey
+
 
 from backend.database import Base
 
@@ -14,6 +16,12 @@ class EngineEvent(Base):
 
     equipment_id: Mapped[int] = mapped_column(
         ForeignKey("equipment.id"),
+        nullable=False,
+        index=True,
+    )
+    
+    shift_id: Mapped[int] = mapped_column(
+        ForeignKey("shifts.id"),
         nullable=False,
         index=True,
     )
@@ -70,3 +78,4 @@ class EngineEvent(Base):
         nullable=False,
         default=datetime.utcnow,
     )
+    

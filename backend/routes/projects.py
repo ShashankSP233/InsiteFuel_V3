@@ -83,6 +83,7 @@ def create_new_project(
             name=payload.name,
             code=payload.code,
             description=payload.description,
+            created_by_user_id=current_user.id,
         )
 
         db.commit()
@@ -132,6 +133,8 @@ def update_existing_project(
             code=payload.code,
             description=payload.description,
             is_active=payload.is_active,
+            updated_by_user_id=current_user.id,
+            
         )
 
         db.commit()

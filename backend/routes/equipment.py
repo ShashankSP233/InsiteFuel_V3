@@ -82,6 +82,7 @@ def create_new_equipment(
             name=payload.name,
             equipment_type=payload.equipment_type,
             code=payload.code,
+            created_by_user_id=current_user.id
         )
 
         db.commit()
@@ -130,6 +131,7 @@ def update_existing_equipment(
             equipment_type=payload.equipment_type,
             code=payload.code,
             is_active=payload.is_active,
+            updated_by_user_id=current_user.id
         )
 
         db.commit()

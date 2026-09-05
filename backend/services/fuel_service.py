@@ -4,8 +4,14 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.models.fuel import FuelTransaction, FuelTransactionType
+from backend.models.fuel import (
+    AdjustmentDirection,
+    FuelTransaction,
+    FuelTransactionType,
+)
 from backend.models.shift import Shift
+from backend.services.audit_service import AuditService
+from backend.services.audit_service import AuditService
 
 
 class FuelService:
@@ -16,6 +22,7 @@ class FuelService:
         vessel_id: int,
         shift_date: date,
         shift_name: str,
+        created_by_user_id: int | None = None,
     ) -> Shift:
         """
         Get an existing shift or create it.
@@ -116,6 +123,22 @@ class FuelService:
         db.add(shift)
         db.flush()
 
+        AuditService.log(
+            db=db,
+            user_id=created_by_user_id,
+            action="CREATE_SHIFT",
+            entity="shifts",
+            entity_id=shift.id,
+            old_values=None,
+            new_values={
+                "vessel_id": shift.vessel_id,
+                "shift_date": shift.shift_date.isoformat(),
+                "shift_name": shift.shift_name,
+                "opening_fuel": str(shift.opening_fuel),
+                "status": shift.status,
+            },
+            details="Shift created automatically as part of fuel ledger activity.",
+        )
         return shift
 
     @staticmethod
@@ -177,7 +200,25 @@ class FuelService:
 
         db.add(shift)
         db.flush()
-
+        
+        AuditService.log(
+            db=db,
+            user_id=created_by_user_id,
+            action="ESTABLISH_INITIAL_OPENING_FUEL",
+            entity="shifts",
+            entity_id=shift.id,
+            old_values=None,
+            new_values={
+                "vessel_id": shift.vessel_id,
+                "shift_date": shift.shift_date.isoformat(),
+                "shift_name": shift.shift_name.value
+                if hasattr(shift.shift_name, "value")
+                else shift.shift_name,
+                "opening_fuel": str(shift.opening_fuel),
+                "status": shift.status,
+            },
+            details="Initial opening fuel established for the vessel.",
+        )
         return shift
 
     @staticmethod
@@ -315,6 +356,7 @@ class FuelService:
             vessel_id=vessel_id,
             shift_date=shift_date,
             shift_name=shift_name,
+            created_by_user_id=created_by_user_id,
         )
 
         if shift.status != "OPEN":
@@ -341,7 +383,28 @@ class FuelService:
         db.add(transaction)
         db.flush()
 
-        FuelService.recalculate_shift(db, shift.id)
+        FuelService.recalculate_shift(db, shift_id)
+
+        AuditService.log(
+            db=db,
+            user_id=created_by_user_id,
+            action="CREATE_FUEL_TRANSACTION",
+            entity="fuel_transactions",
+            entity_id=transaction.id,
+            old_values=None,
+            new_values={
+                "shift_id": transaction.shift_id,
+                "vessel_id": transaction.vessel_id,
+                "transaction_type": transaction.transaction_type,
+                "quantity": str(transaction.quantity),
+                "adjustment_direction": transaction.adjustment_direction,
+                "reference_type": transaction.reference_type,
+                "reference_id": transaction.reference_id,
+                "transaction_date": transaction.transaction_date.isoformat(),
+                "remarks": transaction.remarks,
+            },
+            details="Fuel ledger transaction created.",
+        )
 
         return transaction
 
@@ -465,6 +528,7 @@ class FuelService:
     def close_shift(
         db: Session,
         shift_id: int,
+        closed_by_user_id: int | None = None,
     ) -> Shift:
         shift = db.get(Shift, shift_id)
 
@@ -499,7 +563,30 @@ class FuelService:
         shift.closed_at = datetime.utcnow()
 
         db.flush()
-
+        AuditService.log(
+            db=db,
+            user_id=closed_by_user_id,
+            action="CLOSE_SHIFT",
+            entity="shifts",
+            entity_id=shift.id,
+            old_values={
+                "status": "OPEN",
+                "calculated_closing_fuel": (
+                    str(shift.calculated_closing_fuel)
+                    if shift.calculated_closing_fuel is not None
+                    else None
+                ),
+            },
+            new_values={
+                "status": shift.status,
+                "calculated_closing_fuel": (
+                    str(shift.calculated_closing_fuel)
+                    if shift.calculated_closing_fuel is not None
+                    else None
+                ),
+            },
+            details="Shift closed and final fuel balance calculated.",
+        )
         return shift
 
     @staticmethod
@@ -524,6 +611,8 @@ class FuelService:
         db: Session,
         shift_id: int,
         new_opening_fuel: Decimal,
+        corrected_by_user_id: int,
+        reason: str,
     ) -> Shift:
         shift = db.get(Shift, shift_id)
 
@@ -536,17 +625,79 @@ class FuelService:
             )
 
         old_opening_fuel = Decimal(str(shift.opening_fuel))
+        new_opening_fuel = Decimal(str(new_opening_fuel))
+        if not reason or not reason.strip():
+            raise ValueError("Correction reason is required.")
 
         if old_opening_fuel == new_opening_fuel:
             return shift
 
+        # Correct the selected shift's opening
         shift.opening_fuel = new_opening_fuel
 
+        # Recalculate the selected shift
         FuelService.recalculate_shift(
             db,
             shift_id,
         )
 
+        # Find all existing shifts after this shift
+        subsequent_shifts = db.scalars(
+            select(Shift)
+            .where(
+                Shift.vessel_id == shift.vessel_id,
+                Shift.shift_date >= shift.shift_date,
+            )
+            .order_by(
+                Shift.shift_date.asc(),
+                Shift.id.asc(),
+            )
+        ).all()
+
+        previous_shift = shift
+
+        for next_shift in subsequent_shifts:
+            # Skip the shift we just corrected
+            if next_shift.id == shift.id:
+                continue
+
+            # The next shift opens with the previous shift's
+            # recalculated closing fuel.
+            if previous_shift.calculated_closing_fuel is None:
+                raise ValueError(
+                    f"Shift {previous_shift.id} has no calculated closing fuel."
+                )
+
+            next_shift.opening_fuel = Decimal(
+                str(previous_shift.calculated_closing_fuel)
+            )
+
+            FuelService.recalculate_shift(
+                db,
+                next_shift.id,
+            )
+
+            previous_shift = next_shift
+            
+        AuditService.log(
+            db=db,
+            user_id=corrected_by_user_id,
+            action="CORRECT_OPENING_FUEL",
+            entity="shifts",
+            entity_id=shift.id,
+            old_values={
+                "opening_fuel": str(old_opening_fuel),
+            },
+            new_values={
+                "opening_fuel": str(new_opening_fuel),
+            },
+            reason=reason.strip(),
+            details=(
+                f"Opening fuel corrected from "
+                f"{old_opening_fuel} to {new_opening_fuel}. "
+                f"Subsequent shift openings and closings were recalculated."
+            ),
+        )
         return shift
 
     @staticmethod
@@ -564,3 +715,152 @@ class FuelService:
             .where(FuelTransaction.shift_id == shift_id)
             .order_by(FuelTransaction.transaction_date, FuelTransaction.id)
         ).all()
+
+
+    @staticmethod
+    def correct_adjustment(
+        db: Session,
+        adjustment_id: int,
+        new_quantity: Decimal,
+        new_direction: AdjustmentDirection,
+        corrected_by_user_id: int,
+        correction_remarks: str,
+    ) -> FuelTransaction:
+        """
+        Correct an adjustment without modifying historical ledger entries.
+
+        Each correction:
+            1. Reverses the currently effective adjustment.
+            2. Creates a new corrected adjustment.
+            3. Records an audit entry.
+
+        This allows an adjustment to be corrected multiple times while
+        preserving the complete correction history.
+        """
+
+        if new_quantity <= 0:
+            raise ValueError(
+                "Corrected adjustment quantity must be greater than zero."
+            )
+
+        if not correction_remarks or not correction_remarks.strip():
+            raise ValueError(
+                "Correction remarks are required."
+            )
+
+        current = db.get(FuelTransaction, adjustment_id)
+
+        if current is None:
+            raise ValueError("Adjustment transaction not found.")
+
+        if current.transaction_type != FuelTransactionType.ADJUSTMENT.value:
+            raise ValueError(
+                "The selected transaction is not an adjustment."
+            )
+
+        # A reversal is part of the correction history and must never
+        # itself be selected as the adjustment being corrected.
+        if current.reference_type == "ADJUSTMENT_CORRECTION_REVERSAL":
+            raise ValueError(
+                "A reversal transaction cannot be corrected directly. "
+                "Correct the effective adjustment instead."
+            )
+
+        if current.adjustment_direction not in (
+            AdjustmentDirection.IN.value,
+            AdjustmentDirection.OUT.value,
+        ):
+            raise ValueError(
+                "Adjustment has an invalid direction."
+            )
+
+        # The adjustment being corrected must belong to a valid shift.
+        shift = db.get(Shift, current.shift_id)
+
+        if shift is None:
+            raise ValueError(
+                "Shift associated with adjustment was not found."
+            )
+
+        old_quantity = Decimal(str(current.quantity))
+        new_quantity = Decimal(str(new_quantity))
+
+        # Do not create a correction if nothing actually changed.
+        if (
+            old_quantity == new_quantity
+            and current.adjustment_direction == new_direction.value
+        ):
+            raise ValueError(
+                "Corrected adjustment is identical to the current adjustment."
+            )
+
+        # Reverse the currently effective adjustment.
+        reversal_direction = (
+            AdjustmentDirection.OUT
+            if current.adjustment_direction == AdjustmentDirection.IN.value
+            else AdjustmentDirection.IN
+        )
+
+        reversal = FuelTransaction(
+            shift_id=current.shift_id,
+            vessel_id=current.vessel_id,
+            transaction_type=FuelTransactionType.ADJUSTMENT.value,
+            quantity=old_quantity,
+            adjustment_direction=reversal_direction.value,
+            reference_type="ADJUSTMENT_CORRECTION_REVERSAL",
+            reference_id=current.id,
+            remarks=f"Reversal of adjustment #{current.id}",
+            created_by_user_id=corrected_by_user_id,
+        )
+
+        db.add(reversal)
+        db.flush()
+
+        # Create the new effective adjustment.
+        corrected = FuelTransaction(
+            shift_id=current.shift_id,
+            vessel_id=current.vessel_id,
+            transaction_type=FuelTransactionType.ADJUSTMENT.value,
+            quantity=new_quantity,
+            adjustment_direction=new_direction.value,
+            reference_type="ADJUSTMENT_CORRECTION",
+            reference_id=current.id,
+            remarks=correction_remarks.strip(),
+            created_by_user_id=corrected_by_user_id,
+        )
+
+        db.add(corrected)
+        db.flush()
+
+        # Recalculate the affected shift.
+        FuelService.recalculate_shift(
+            db,
+            current.shift_id,
+        )
+
+        # Record the correction in the audit log.
+        AuditService.log(
+            db=db,
+            user_id=corrected_by_user_id,
+            action="CORRECT_ADJUSTMENT",
+            entity="fuel_transactions",
+            entity_id=corrected.id,
+            old_values={
+                "transaction_id": current.id,
+                "quantity": str(old_quantity),
+                "adjustment_direction": current.adjustment_direction,
+            },
+            new_values={
+                "transaction_id": corrected.id,
+                "quantity": str(new_quantity),
+                "adjustment_direction": new_direction.value,
+            },
+            reason=correction_remarks.strip(),
+            details=(
+                f"Adjustment #{current.id} corrected by creating "
+                f"reversal #{reversal.id} and corrected transaction "
+                f"#{corrected.id}."
+            ),
+        )
+
+        return corrected
