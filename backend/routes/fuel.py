@@ -80,6 +80,7 @@ def establish_initial_opening(
             vessel_id=payload.vessel_id,
             shift_date=payload.shift_date,
             opening_fuel=payload.opening_fuel,
+            created_by_user_id=current_user.id,
         )
 
         db.commit()
@@ -148,8 +149,9 @@ def record_receipt(
             quantity=payload.quantity,
             created_by_user_id=current_user.id,
             remarks=payload.remarks,
+            source_vessel_id=payload.source_vessel_id,
+            fuel_source=payload.fuel_source,
         )
-
         db.commit()
         db.refresh(transaction)
 

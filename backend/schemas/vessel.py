@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,6 +13,7 @@ class VesselCreate(BaseModel):
         default=None,
         max_length=50,
     )
+    fuel_threshold_litres: Decimal = Decimal("0")
 
 
 class VesselUpdate(BaseModel):
@@ -25,6 +28,7 @@ class VesselUpdate(BaseModel):
         max_length=50,
     )
     is_active: bool | None = None
+    fuel_threshold_litres: Decimal | None = None
 
 
 class VesselResponse(BaseModel):
@@ -35,3 +39,4 @@ class VesselResponse(BaseModel):
     name: str
     code: str | None
     is_active: bool
+    fuel_threshold_litres: Decimal

@@ -25,6 +25,8 @@ class FuelTransactionCreate(BaseModel):
     reference_type: str | None = None
     reference_id: int | None = None
     remarks: str | None = Field(default=None, max_length=500)
+    source_vessel_id: int | None = None
+    fuel_source: str | None = Field(default=None, max_length=200)
 
 
 class FuelTransactionResponse(BaseModel):
@@ -42,6 +44,8 @@ class FuelTransactionResponse(BaseModel):
     remarks: str | None
     created_by_user_id: int
     created_at: datetime
+    source_vessel_id: int | None
+    fuel_source: str | None
 
 
 class ShiftResponse(BaseModel):

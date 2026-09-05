@@ -8,7 +8,8 @@ from backend.models.engine import EngineEvent
 from backend.models.transfer import FuelTransfer, TransferStatus
 from backend.models.session import Session
 from backend.models.audit_log import AuditLog
-
+from backend.models.sounding import Sounding
+from backend.models.attachment import Attachment
 
 __all__ = [
     "User",
@@ -23,4 +24,6 @@ __all__ = [
     "TransferStatus",
     "Session",
     "AuditLog",
+    "Sounding",
+    "Attachment"
 ]

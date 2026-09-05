@@ -17,6 +17,7 @@ from backend.schemas.vessel import (
 from backend.services.vessel_service import (
     create_vessel,
     get_vessel_by_id,
+    update_fuel_threshold,
     update_vessel,
 )
 
@@ -81,6 +82,7 @@ def create_new_vessel(
             project_id=payload.project_id,
             name=payload.name,
             code=payload.code,
+            fuel_threshold_litres=payload.fuel_threshold_litres,
             created_by_user_id=current_user.id
         )
 
@@ -129,7 +131,58 @@ def update_existing_vessel(
             name=payload.name,
             code=payload.code,
             is_active=payload.is_active,
+            fuel_threshold_litres=payload.fuel_threshold_litres,
             updated_by_user_id=current_user.id
+        )
+
+        db.commit()
+        db.refresh(vessel)
+
+        return vessel
+
+    except ValueError as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+@router.put(
+    "/{vessel_id}/threshold",
+    response_model=VesselResponse,
+)
+def update_vessel_threshold(
+    vessel_id: int,
+    payload: VesselUpdate,
+    db: Session = Depends(db_session),
+    current_user: User = Depends(
+        require_roles(UserRole.MANAGER)
+    ),
+):
+    vessel = get_vessel_by_id(
+        db,
+        vessel_id,
+    )
+
+    if vessel is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vessel not found.",
+        )
+
+    if payload.fuel_threshold_litres is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fuel_threshold_litres is required.",
+        )
+
+    try:
+        vessel = update_fuel_threshold(
+            db,
+            vessel,
+            payload.fuel_threshold_litres,
+            updated_by_user_id=current_user.id,
         )
 
         db.commit()

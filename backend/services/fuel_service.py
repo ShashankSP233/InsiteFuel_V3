@@ -10,7 +10,7 @@ from backend.models.fuel import (
     FuelTransactionType,
 )
 from backend.models.shift import Shift
-from backend.services.audit_service import AuditService
+from backend.models.vessel import Vessel
 from backend.services.audit_service import AuditService
 
 
@@ -147,6 +147,7 @@ class FuelService:
         vessel_id: int,
         shift_date: date,
         opening_fuel: Decimal,
+        created_by_user_id: int | None = None,
     ) -> Shift:
         """
         Establish the opening fuel for the first-ever MORNING shift
@@ -315,7 +316,6 @@ class FuelService:
 
         return shift
 
-    @staticmethod
     def add_transaction(
         db: Session,
         vessel_id: int,
@@ -328,6 +328,8 @@ class FuelService:
         reference_type: str | None = None,
         reference_id: int | None = None,
         remarks: str | None = None,
+        source_vessel_id: int | None = None,
+        fuel_source: str | None = None,
     ) -> FuelTransaction:
         """
         Add a fuel ledger transaction to a vessel shift.
@@ -350,7 +352,31 @@ class FuelService:
                 raise ValueError(
                     "Adjustment direction is only allowed for ADJUSTMENT transactions."
                 )
+        # Fuel source information is only valid for fuel receipts.
+        if transaction_type == FuelTransactionType.RECEIPT:
+            if fuel_source is not None:
+                fuel_source = fuel_source.strip() or None
 
+            if source_vessel_id is not None:
+                if source_vessel_id == vessel_id:
+                    raise ValueError(
+                        "Source vessel cannot be the same as the receiving vessel."
+                    )
+
+                from backend.models.vessel import Vessel
+
+                source_vessel = db.get(Vessel, source_vessel_id)
+
+                if source_vessel is None:
+                    raise ValueError("Source vessel not found.")
+
+                if not source_vessel.is_active:
+                    raise ValueError("Source vessel is not active.")
+        else:
+            if source_vessel_id is not None or fuel_source is not None:
+                raise ValueError(
+                    "Fuel source information is only allowed for RECEIPT transactions."
+                )
         shift = FuelService.get_or_create_shift(
             db=db,
             vessel_id=vessel_id,
@@ -377,13 +403,15 @@ class FuelService:
             reference_type=reference_type,
             reference_id=reference_id,
             remarks=remarks,
+            source_vessel_id=source_vessel_id,
+            fuel_source=fuel_source,    
             created_by_user_id=created_by_user_id,
         )
 
         db.add(transaction)
         db.flush()
 
-        FuelService.recalculate_shift(db, shift_id)
+        FuelService.recalculate_shift(db, shift.id)
 
         AuditService.log(
             db=db,
@@ -400,6 +428,8 @@ class FuelService:
                 "adjustment_direction": transaction.adjustment_direction,
                 "reference_type": transaction.reference_type,
                 "reference_id": transaction.reference_id,
+                "source_vessel_id": transaction.source_vessel_id,
+                "fuel_source": transaction.fuel_source,
                 "transaction_date": transaction.transaction_date.isoformat(),
                 "remarks": transaction.remarks,
             },
@@ -417,6 +447,8 @@ class FuelService:
         quantity: Decimal,
         created_by_user_id: int,
         remarks: str | None = None,
+        source_vessel_id: int | None = None,
+        fuel_source: str | None = None,
     ) -> FuelTransaction:
         return FuelService.add_transaction(
             db=db,
@@ -427,6 +459,8 @@ class FuelService:
             quantity=quantity,
             created_by_user_id=created_by_user_id,
             remarks=remarks,
+            source_vessel_id=source_vessel_id,
+            fuel_source=fuel_source,
         )
 
     @staticmethod

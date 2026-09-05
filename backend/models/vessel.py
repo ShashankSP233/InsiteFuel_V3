@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, String, Numeric
 from sqlalchemy.orm import Mapped, mapped_column
-
+from decimal import Decimal
 from backend.database import Base
 
 
@@ -36,4 +36,10 @@ class Vessel(Base):
         DateTime(timezone=True),
         nullable=False,
         default=datetime.utcnow,
+    )
+
+    fuel_threshold_litres: Mapped[Decimal] = mapped_column(
+        Numeric(12, 3),
+        nullable=False,
+        default=Decimal("0"),
     )

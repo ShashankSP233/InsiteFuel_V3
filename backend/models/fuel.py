@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database import Base
@@ -41,6 +41,16 @@ class FuelTransaction(Base):
         ForeignKey("vessels.id"),
         nullable=False,
         index=True,
+    )
+    source_vessel_id: Mapped[int | None] = mapped_column(
+        ForeignKey("vessels.id"),
+        nullable=True,
+        index=True,
+    )
+    
+    fuel_source: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
     )
 
     transaction_type: Mapped[FuelTransactionType] = mapped_column(
