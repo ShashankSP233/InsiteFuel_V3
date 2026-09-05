@@ -8,10 +8,8 @@ from backend.models.attachment import Attachment
 from backend.services.audit_service import AuditService
 
 
-# Store uploaded files outside the Python source tree.
 ATTACHMENT_STORAGE_DIR = Path("storage/attachments")
 
-# Initial allowed types.
 ALLOWED_CONTENT_TYPES = {
     "image/jpeg",
     "image/png",
@@ -39,12 +37,11 @@ class AttachmentService:
 
         if file.content_type not in ALLOWED_CONTENT_TYPES:
             raise ValueError(
-                "Unsupported file type. Only JPEG, PNG, WebP, PDF files are allowed."
+                "Unsupported file type. "
+                "Only JPEG, PNG, WebP, PDF files are allowed."
             )
 
-        original_filename = Path(
-            file.filename
-        ).name
+        original_filename = Path(file.filename).name
 
         if not original_filename:
             raise ValueError(
@@ -80,9 +77,7 @@ class AttachmentService:
             / stored_filename
         )
 
-        storage_path.write_bytes(
-            file_bytes
-        )
+        storage_path.write_bytes(file_bytes)
 
         attachment = Attachment(
             original_filename=original_filename,
