@@ -13,6 +13,7 @@ from backend.database import get_db
 from backend.dependencies import get_current_user
 from backend.models.user import User
 from backend.services.attachment_service import AttachmentService
+from backend.models.sounding import Sounding
 
 router = APIRouter(
     prefix="/api/attachments",
@@ -133,6 +134,24 @@ def delete_attachment(
             detail="Attachment not found.",
         )
 
+    # Prevent deleting attachments that are linked to a sounding.
+    sounding = (
+        db.query(Sounding)
+        .filter(
+            Sounding.attachment_id == attachment_id
+        )
+        .first()
+    )
+
+    if sounding is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Attachment is currently used by a sounding "
+                "and cannot be deleted."
+            ),
+        )
+
     try:
         AttachmentService.delete_attachment(
             db=db,
@@ -152,3 +171,5 @@ def delete_attachment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+
+    

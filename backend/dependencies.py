@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
@@ -8,6 +11,7 @@ from backend.models.session import Session as UserSession
 from backend.models.user import User, UserRole
 from backend.services.auth_service import get_session
 
+security = HTTPBearer()
 
 def db_session():
     db = SessionLocal()
@@ -19,23 +23,11 @@ def db_session():
 
 
 def get_authenticated_session(
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(db_session),
 ) -> tuple[User, UserSession]:
 
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required.",
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication scheme.",
-        )
-
-    token = authorization[7:].strip()
+    token = credentials.credentials
 
     if not token:
         raise HTTPException(

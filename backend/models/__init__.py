@@ -10,6 +10,8 @@ from backend.models.session import Session
 from backend.models.audit_log import AuditLog
 from backend.models.sounding import Sounding
 from backend.models.attachment import Attachment
+from backend.models.production import ProductionRecord
+from backend.models.shift_attachments import ShiftAttachment
 
 __all__ = [
     "User",
@@ -25,5 +27,6 @@ __all__ = [
     "Session",
     "AuditLog",
     "Sounding",
-    "Attachment"
+    "Attachment",
+    "ProductionRecord",
 ]

@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 from backend.models.attachment import Attachment
 from backend.models.sounding import Sounding
 from backend.models.vessel import Vessel
+from backend.config import settings
 from backend.services.audit_service import AuditService
 
 
-SOUNDING_DEADLINE_HOUR = 6
-SOUNDING_DEADLINE_MINUTE = 0
+SOUNDING_DEADLINE_HOUR = settings.sounding_deadline_hour
+SOUNDING_DEADLINE_MINUTE = settings.sounding_deadline_minute
 
 ALLOWED_SOUNDING_CONTENT_TYPES = {
     "image/jpeg",
@@ -186,12 +187,12 @@ class SoundingService:
         """
 
         if now is None:
-            now = datetime.utcnow()
+            now =  datetime.now(timezone.utc)
 
         vessels = list(
             db.scalars(
                 select(Vessel)
-                .where(Vessel.active.is_(True))
+                .where(Vessel.is_active.is_(True))
                 .order_by(Vessel.name)
             ).all()
         )

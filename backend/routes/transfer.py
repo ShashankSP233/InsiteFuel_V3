@@ -43,7 +43,6 @@ def initiate_transfer(
             to_shift_id=data.to_shift_id,
             initiated_quantity=data.initiated_quantity,
             initiated_by_user_id=current_user.id,
-            transfer_date=data.transfer_date,
             notes=data.notes,
         )
 

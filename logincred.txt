@@ -1,0 +1,4 @@
+Manager	seed_manager	    
+Operator	operator01	Operator@2026!
+Operator	operator02	Operator@2026!
+admin      admin          ChangeMe@2026!
