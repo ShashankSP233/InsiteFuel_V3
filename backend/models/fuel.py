@@ -6,6 +6,7 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, I
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database import Base
+from backend.utils.time import now_ist
 
 
 class FuelTransactionType(str, Enum):
@@ -81,7 +82,7 @@ class FuelTransaction(Base):
     transaction_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=now_ist,
         index=True,
     )
 
@@ -99,5 +100,5 @@ class FuelTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=now_ist,
     )

@@ -182,7 +182,7 @@ class TransferService:
         transfer.received_quantity = received_quantity
         transfer.loss_quantity = loss_quantity
         transfer.received_by_user_id = received_by_user_id
-        transfer.received_at = datetime.utcnow()
+        transfer.received_at = now_ist()
 
         if notes:
             transfer.notes = notes
@@ -284,7 +284,7 @@ class TransferService:
 
         transfer.status = TransferStatus.REJECTED
         transfer.reviewed_by_user_id = reviewed_by_user_id
-        transfer.reviewed_at = datetime.utcnow()
+        transfer.reviewed_at = now_ist()
         transfer.manager_remark = manager_remark.strip()
 
         AuditService.log(
@@ -440,9 +440,9 @@ class TransferService:
 
         transfer.status = TransferStatus.APPROVED
         transfer.reviewed_by_user_id = approved_by_user_id
-        transfer.reviewed_at = datetime.utcnow()
+        transfer.reviewed_at = now_ist()
         transfer.approved_by_user_id = approved_by_user_id
-        transfer.approved_at = datetime.utcnow()
+        transfer.approved_at = now_ist()
 
         if manager_remark:
             transfer.manager_remark = manager_remark.strip()

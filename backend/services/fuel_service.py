@@ -594,7 +594,7 @@ class FuelService:
             )
 
         shift.status = "CLOSED"
-        shift.closed_at = datetime.utcnow()
+        shift.closed_at = now_ist()
 
         db.flush()
         AuditService.log(

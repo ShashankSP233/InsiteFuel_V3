@@ -6,6 +6,7 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database import Base
+from backend.utils.time import now_ist
 
 
 class TransferStatus(str, Enum):
@@ -90,7 +91,7 @@ class FuelTransfer(Base):
     transfer_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=now_ist,
         index=True,
     )
 
@@ -117,7 +118,7 @@ class FuelTransfer(Base):
     initiated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=now_ist,
     )
 
     received_at: Mapped[datetime | None] = mapped_column(
@@ -148,5 +149,5 @@ class FuelTransfer(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=datetime.utcnow,
+        default=now_ist,
     )
