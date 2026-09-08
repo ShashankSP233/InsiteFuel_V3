@@ -10,6 +10,7 @@ from backend.models.transfer import FuelTransfer, TransferStatus
 from backend.models.vessel import Vessel
 from backend.services.fuel_service import FuelService
 from backend.services.audit_service import AuditService
+from backend.utils.time import now_ist
 
 class TransferService:
 

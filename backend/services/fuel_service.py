@@ -12,6 +12,8 @@ from backend.models.fuel import (
 from backend.models.shift import Shift
 from backend.models.vessel import Vessel
 from backend.services.audit_service import AuditService
+from backend.utils.time import now_ist
+
 
 
 class FuelService:
