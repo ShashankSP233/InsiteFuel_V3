@@ -48,6 +48,11 @@ class FuelTransactionResponse(BaseModel):
     fuel_source: str | None
 
 
+class ShiftProductionDataUpdate(BaseModel):
+    advancement_m: Decimal | None = Field(default=None, ge=0)
+    dredging_hours: Decimal | None = Field(default=None, ge=0)
+
+
 class ShiftResponse(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -57,6 +62,8 @@ class ShiftResponse(BaseModel):
     shift_name: str
     opening_fuel: Decimal
     calculated_closing_fuel: Decimal | None
+    advancement_m: Decimal | None
+    dredging_hours: Decimal | None
     status: str
     created_at: datetime
     closed_at: datetime | None
@@ -84,6 +91,8 @@ class ShiftCloseResponse(BaseModel):
     shift_name: str
     opening_fuel: Decimal
     calculated_closing_fuel: Decimal
+    advancement_m: Decimal | None
+    dredging_hours: Decimal | None
     status: str
     closed_at: datetime | None
 

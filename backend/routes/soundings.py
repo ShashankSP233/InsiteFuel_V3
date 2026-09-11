@@ -1,21 +1,22 @@
-from datetime import date, datetime, timezone
+from datetime import date
 
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.dependencies import get_current_user
+from backend.models.attachment import Attachment
+from backend.models.sounding import Sounding
 from backend.models.user import User
 from backend.schemas.sounding import (
+    SoundingComplianceResponse,
+    SoundingMissingResponse,
     SoundingResponse,
     SoundingStatusResponse,
-    SoundingMissingResponse,
-    SoundingComplianceResponse,
 )
+from backend.dependencies import get_current_user
 from backend.services.sounding_service import SoundingService
 
-from backend.models.attachment import Attachment
 
 router = APIRouter(
     prefix="/api/soundings",
@@ -26,11 +27,9 @@ router = APIRouter(
 @router.post(
     "",
     response_model=SoundingResponse,
-    status_code=status.HTTP_201_CREATED,
 )
 def create_sounding(
-    vessel_id: int,
-    report_date: date,
+    shift_id: int,
     attachment_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -38,8 +37,7 @@ def create_sounding(
     try:
         sounding = SoundingService.create_sounding(
             db=db,
-            vessel_id=vessel_id,
-            report_date=report_date,
+            shift_id=shift_id,
             attachment_id=attachment_id,
             submitted_by_user_id=current_user.id,
         )
@@ -51,9 +49,8 @@ def create_sounding(
 
     except ValueError as exc:
         db.rollback()
-
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail=str(exc),
         )
 
@@ -63,23 +60,14 @@ def create_sounding(
     response_model=list[SoundingResponse],
 )
 def list_soundings(
-    vessel_id: int,
-    report_date: date | None = None,
+    shift_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    try:
-        return SoundingService.list_soundings(
-            db=db,
-            vessel_id=vessel_id,
-            report_date=report_date,
-        )
-
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(exc),
-        )
+    return SoundingService.list_soundings(
+        db=db,
+        shift_id=shift_id,
+    )
 
 
 @router.get(
@@ -87,72 +75,21 @@ def list_soundings(
     response_model=SoundingStatusResponse,
 )
 def get_sounding_status(
-    vessel_id: int,
-    report_date: date,
+    shift_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     try:
-        soundings = SoundingService.list_soundings(
+        return SoundingService.get_shift_status(
             db=db,
-            vessel_id=vessel_id,
-            report_date=report_date,
+            shift_id=shift_id,
         )
-
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=404,
             detail=str(exc),
         )
 
-    now = datetime.now(timezone.utc)
-
-    deadline = SoundingService.get_deadline(report_date)
-
-    status_value = SoundingService.get_status(
-        report_date=report_date,
-        soundings=soundings,
-        now=now,
-    )
-
-    return SoundingStatusResponse(
-        vessel_id=vessel_id,
-        report_date=report_date,
-        status=status_value,
-        deadline=deadline,
-        sounding_count=len(soundings),
-    )
-
-@router.get("/{sounding_id}/image")
-def get_sounding_image(
-    sounding_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    sounding = SoundingService.get_sounding(
-        db=db,
-        sounding_id=sounding_id,
-    )
-
-    if sounding is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Sounding not found.",
-        )
-
-    attachment = db.get(Attachment, sounding.attachment_id)
-
-    if attachment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Sounding attachment not found.",
-        )
-
-    return FileResponse(
-        path=attachment.storage_path,
-        media_type=attachment.content_type,
-        filename=attachment.original_filename,
-    )
 
 @router.get(
     "/status/all",
@@ -168,6 +105,7 @@ def get_all_sounding_statuses(
         report_date=report_date,
     )
 
+
 @router.get(
     "/compliance",
     response_model=SoundingComplianceResponse,
@@ -182,6 +120,7 @@ def get_sounding_compliance(
         report_date=report_date,
     )
 
+
 @router.get(
     "/{sounding_id}",
     response_model=SoundingResponse,
@@ -191,15 +130,46 @@ def get_sounding(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    sounding = SoundingService.get_sounding(
-        db=db,
-        sounding_id=sounding_id,
-    )
+    sounding = db.get(Sounding, sounding_id)
 
     if sounding is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=404,
             detail="Sounding not found.",
         )
 
     return sounding
+
+
+@router.get(
+    "/{sounding_id}/image",
+)
+def get_sounding_image(
+    sounding_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sounding = db.get(Sounding, sounding_id)
+
+    if sounding is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Sounding not found.",
+        )
+
+    attachment = db.get(
+        Attachment,
+        sounding.attachment_id,
+    )
+
+    if attachment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Sounding attachment not found.",
+        )
+
+    return FileResponse(
+        attachment.storage_path,
+        media_type=attachment.content_type,
+        filename=attachment.original_filename,
+    )

@@ -11,6 +11,9 @@ from backend.models.vessel import Vessel
 from backend.services.fuel_service import FuelService
 from backend.services.audit_service import AuditService
 from backend.utils.time import now_ist
+from backend.models.transfer_attachment import TransferAttachment
+
+
 
 class TransferService:
 

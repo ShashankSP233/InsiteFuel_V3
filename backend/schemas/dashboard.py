@@ -34,6 +34,8 @@ class FuelDashboardRow(BaseModel):
     adjustment_out: Decimal
 
     closing_fuel: Decimal
+    advancement_m: Decimal | None = None
+    dredging_hours: Decimal | None = None
     fuel_threshold_litres: Decimal
 
     flags: list[str]
@@ -48,6 +50,8 @@ class FuelDashboardResponse(BaseModel):
     total_received: Decimal
     total_consumption: Decimal
     total_transfer_out: Decimal
+    total_advancement_m: Decimal
+    total_dredging_hours: Decimal
 
     record_count: int
     submitted_count: int

@@ -1,84 +1,94 @@
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.models.attachment import Attachment
+from backend.models.shift import Shift
 from backend.models.sounding import Sounding
 from backend.models.vessel import Vessel
-from backend.config import settings
 from backend.services.audit_service import AuditService
-
-
-SOUNDING_DEADLINE_HOUR = settings.sounding_deadline_hour
-SOUNDING_DEADLINE_MINUTE = settings.sounding_deadline_minute
-
-ALLOWED_SOUNDING_CONTENT_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-}
+from backend.utils.time import now_ist
 
 
 class SoundingService:
+    MAX_SOUNDINGS_PER_SHIFT = 5
 
     @staticmethod
     def get_deadline(report_date: date) -> datetime:
         """
-        Sounding for a report date is due by 06:00
-        on the following calendar day.
+        Soundings for a shift/date are due by 06:00 UTC on the
+        following calendar day.
         """
-        deadline_date = report_date + timedelta(days=1)
-
+        next_day = report_date + timedelta(days=1)
         return datetime.combine(
-            deadline_date,
-            time(
-                SOUNDING_DEADLINE_HOUR,
-                SOUNDING_DEADLINE_MINUTE,
-                tzinfo=timezone.utc,
-            ),
+            next_day,
+            time(6, 0),
         )
 
     @staticmethod
     def create_sounding(
         db: Session,
-        *,
-        vessel_id: int,
-        report_date: date,
+        shift_id: int,
         attachment_id: int,
         submitted_by_user_id: int,
     ) -> Sounding:
+        """
+        Create a sounding against a specific OPEN shift.
 
-        # ---------------------------------------------------------
-        # Validate vessel
-        # ---------------------------------------------------------
-        vessel = db.get(Vessel, vessel_id)
+        A shift may contain a maximum of 5 soundings.
+        """
 
-        if vessel is None:
-            raise ValueError("Vessel not found.")
+        # Lock the shift row so two simultaneous uploads cannot
+        # both pass the maximum-count check.
+        shift = db.scalar(
+            select(Shift)
+            .where(Shift.id == shift_id)
+            .with_for_update()
+        )
 
-        # ---------------------------------------------------------
-        # Validate attachment
-        # ---------------------------------------------------------
+        if shift is None:
+            raise ValueError("Shift not found.")
+
+        if shift.status != "OPEN":
+            raise ValueError(
+                "Sounding can only be submitted for an open shift."
+            )
+
+        sounding_count = db.scalar(
+            select(func.count(Sounding.id))
+            .where(Sounding.shift_id == shift.id)
+        ) or 0
+
+        if sounding_count >= SoundingService.MAX_SOUNDINGS_PER_SHIFT:
+            raise ValueError(
+                f"A shift can have a maximum of "
+                f"{SoundingService.MAX_SOUNDINGS_PER_SHIFT} soundings."
+            )
+
         attachment = db.get(Attachment, attachment_id)
 
         if attachment is None:
             raise ValueError("Attachment not found.")
 
-        if attachment.content_type not in ALLOWED_SOUNDING_CONTENT_TYPES:
+        allowed_types = {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+        }
+
+        if attachment.content_type not in allowed_types:
             raise ValueError(
                 "Sounding attachment must be a JPEG, PNG, or WebP image."
             )
 
-        # ---------------------------------------------------------
-        # Create sounding
-        # ---------------------------------------------------------
-        submitted_at = datetime.now(timezone.utc)
+        submitted_at = now_ist()
 
         sounding = Sounding(
-            vessel_id=vessel_id,
-            report_date=report_date,
-            attachment_id=attachment_id,
+            shift_id=shift.id,
+            vessel_id=shift.vessel_id,
+            report_date=shift.shift_date,
+            attachment_id=attachment.id,
             submitted_at=submitted_at,
             submitted_by_user_id=submitted_by_user_id,
         )
@@ -86,182 +96,234 @@ class SoundingService:
         db.add(sounding)
         db.flush()
 
-        # ---------------------------------------------------------
-        # Audit
-        # ---------------------------------------------------------
         AuditService.log(
-            db,
+            db=db,
             user_id=submitted_by_user_id,
             action="CREATE_SOUNDING",
-            entity="Sounding",
+            entity="soundings",
             entity_id=sounding.id,
+            old_values=None,
             new_values={
-                "vessel_id": vessel_id,
-                "report_date": report_date.isoformat(),
-                "attachment_id": attachment_id,
-                "submitted_at": submitted_at.isoformat(),
+                "shift_id": shift_id,
+                "vessel_id": sounding.vessel_id,
+                "report_date": sounding.report_date.isoformat(),
+                "attachment_id": sounding.attachment_id,
+                "submitted_at": sounding.submitted_at.isoformat(),
             },
+            details="Shift sounding created.",
         )
 
         return sounding
 
     @staticmethod
-    def get_sounding(
-        db: Session,
-        sounding_id: int,
-    ) -> Sounding | None:
-
-        return db.get(Sounding, sounding_id)
-
-    @staticmethod
     def list_soundings(
         db: Session,
-        *,
-        vessel_id: int,
-        report_date: date | None = None,
+        shift_id: int,
     ) -> list[Sounding]:
-
-        # Make sure the vessel exists.
-        vessel = db.get(Vessel, vessel_id)
-
-        if vessel is None:
-            raise ValueError("Vessel not found.")
-
-        stmt = select(Sounding).where(
-            Sounding.vessel_id == vessel_id
+        """
+        List all soundings belonging to one shift.
+        """
+        return list(
+            db.scalars(
+                select(Sounding)
+                .where(Sounding.shift_id == shift_id)
+                .order_by(Sounding.created_at.asc())
+            ).all()
         )
-
-        if report_date is not None:
-            stmt = stmt.where(
-                Sounding.report_date == report_date
-            )
-
-        stmt = stmt.order_by(
-            Sounding.submitted_at.desc()
-        )
-
-        return list(db.scalars(stmt).all())
 
     @staticmethod
     def get_status(
-        *,
         report_date: date,
         soundings: list[Sounding],
         now: datetime | None = None,
     ) -> str:
+        """
+        Determine sounding compliance status for a shift.
 
-        if now is None:
-            now = datetime.now(timezone.utc)
+        SUBMITTED:
+            At least one sounding exists.
 
+        LATE:
+            No sounding existed before the deadline, but one exists now.
+
+        DUE:
+            Deadline has not passed and no sounding exists.
+
+        MISSING:
+            Deadline has passed and no sounding exists.
+        """
+
+        if soundings:
+            deadline = SoundingService.get_deadline(report_date)
+
+            if soundings[0].submitted_at > deadline:
+                return "LATE"
+
+            return "SUBMITTED"
+
+        current_time = now or now_ist()
         deadline = SoundingService.get_deadline(report_date)
 
-        # No sounding submitted yet.
-        if not soundings:
-            if now <= deadline:
-                return "DUE"
-
+        if current_time >= deadline:
             return "MISSING"
 
-        # At least one sounding exists.
-        #
-        # If any sounding was submitted by the deadline,
-        # the requirement was satisfied on time.
-        for sounding in soundings:
-            if sounding.submitted_at <= deadline:
-                return "SUBMITTED"
+        return "DUE"
 
-        # Soundings exist, but all were submitted after
-        # the deadline.
-        return "LATE"
+    @staticmethod
+    def get_shift_status(
+        db: Session,
+        shift_id: int,
+        now: datetime | None = None,
+    ) -> dict:
+        """
+        Return sounding status for a specific shift.
+        """
+
+        shift = db.get(Shift, shift_id)
+
+        if shift is None:
+            raise ValueError("Shift not found.")
+
+        soundings = SoundingService.list_soundings(
+            db=db,
+            shift_id=shift.id,
+        )
+
+        deadline = SoundingService.get_deadline(
+            shift.shift_date
+        )
+
+        status = SoundingService.get_status(
+            report_date=shift.shift_date,
+            soundings=soundings,
+            now=now,
+        )
+
+        return {
+            "shift_id": shift.id,
+            "vessel_id": shift.vessel_id,
+            "report_date": shift.shift_date,
+            "shift_name": shift.shift_name,
+            "status": status,
+            "deadline": deadline,
+            "sounding_count": len(soundings),
+        }
 
     @staticmethod
     def get_all_vessel_statuses(
         db: Session,
-        *,
         report_date: date,
-        now: datetime | None = None,
     ) -> list[dict]:
         """
-        Return sounding status for every active vessel
-        for the specified report date.
+        Compatibility method for the existing dashboard.
+
+        The old implementation returned one sounding status per vessel.
+        Soundings are now shift-specific, so this returns one status
+        for every shift belonging to an active vessel on the date.
         """
 
-        if now is None:
-            now =  datetime.now(timezone.utc)
-
-        vessels = list(
+        shifts = list(
             db.scalars(
-                select(Vessel)
-                .where(Vessel.is_active.is_(True))
-                .order_by(Vessel.name)
+                select(Shift)
+                .join(Vessel, Vessel.id == Shift.vessel_id)
+                .where(
+                    Shift.shift_date == report_date,
+                    Vessel.is_active.is_(True),
+                )
+                .order_by(
+                    Shift.vessel_id.asc(),
+                    Shift.shift_name.asc(),
+                    Shift.id.asc(),
+                )
             ).all()
         )
 
         results = []
 
-        for vessel in vessels:
+        for shift in shifts:
             soundings = SoundingService.list_soundings(
                 db=db,
-                vessel_id=vessel.id,
-                report_date=report_date,
+                shift_id=shift.id,
+            )
+
+            deadline = SoundingService.get_deadline(
+                shift.shift_date
             )
 
             status = SoundingService.get_status(
-                report_date=report_date,
+                report_date=shift.shift_date,
                 soundings=soundings,
-                now=now,
             )
+
+            vessel = db.get(Vessel, shift.vessel_id)
 
             results.append(
                 {
-                    "vessel_id": vessel.id,
-                    "vessel_name": vessel.name,
-                    "report_date": report_date,
+                    "shift_id": shift.id,
+                    "vessel_id": shift.vessel_id,
+                    "vessel_name": (
+                        vessel.name
+                        if vessel is not None
+                        else f"Vessel {shift.vessel_id}"
+                    ),
+                    "report_date": shift.shift_date,
+                    "shift_name": shift.shift_name,
                     "status": status,
-                    "deadline": SoundingService.get_deadline(report_date),
+                    "deadline": deadline,
                     "sounding_count": len(soundings),
                 }
             )
 
         return results
 
-
     @staticmethod
     def get_compliance(
         db: Session,
-        *,
         report_date: date,
-        now: datetime | None = None,
     ) -> dict:
-        statuses = SoundingService.get_all_vessel_statuses(
-            db=db,
-            report_date=report_date,
-            now=now,
+        """
+        Calculate sounding compliance by shift.
+
+        Each shift is one expected sounding requirement.
+        """
+
+        shifts = list(
+            db.scalars(
+                select(Shift).where(
+                    Shift.shift_date == report_date
+                )
+            ).all()
         )
 
-        expected = len(statuses)
-        submitted = sum(
-            1 for item in statuses
-            if item["status"] == "SUBMITTED"
-        )
-        late = sum(
-            1 for item in statuses
-            if item["status"] == "LATE"
-        )
-        missing = sum(
-            1 for item in statuses
-            if item["status"] == "MISSING"
-        )
-        due = sum(
-            1 for item in statuses
-            if item["status"] == "DUE"
-        )
+        expected = len(shifts)
+        submitted = 0
+        late = 0
+        missing = 0
+        due = 0
 
-        completed = submitted + late
+        for shift in shifts:
+            soundings = SoundingService.list_soundings(
+                db=db,
+                shift_id=shift.id,
+            )
+
+            status = SoundingService.get_status(
+                report_date=shift.shift_date,
+                soundings=soundings,
+            )
+
+            if status == "SUBMITTED":
+                submitted += 1
+            elif status == "LATE":
+                late += 1
+            elif status == "MISSING":
+                missing += 1
+            elif status == "DUE":
+                due += 1
 
         compliance_percentage = (
-            (completed / expected) * 100
-            if expected > 0
+            ((submitted + late) / expected) * 100
+            if expected
             else 100.0
         )
 

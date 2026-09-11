@@ -6,35 +6,48 @@
     <title>InsiteFuel V3</title>
     <link rel="stylesheet" href="/ui/css/style.css" />
   </head>
+
   <body>
     <div id="loginWrap">
       <div class="login-box">
         <div class="login-logo">Insite<span>Fuel</span></div>
         <div class="login-sub">by Dharti · Fuel Monitoring V3</div>
-        <label>Username</label
-        ><input id="loginUser" autocomplete="username" /><label>Password</label
-        ><input
+
+        <label>Username</label>
+        <input id="loginUser" autocomplete="username" />
+
+        <label>Password</label>
+        <input
           id="loginPass"
           type="password"
           autocomplete="current-password"
         />
+
         <button onclick="login()">Sign In</button>
         <div id="loginMsg"></div>
       </div>
     </div>
+
     <div id="appWrap" class="hidden">
       <div class="topbar">
         <div class="topbar-brand">
           Insite<span>Fuel</span> <small>V3</small>
         </div>
+
         <div class="topbar-right">
           <div class="user-chip" id="userChip"></div>
           <button class="btn btn-ghost" onclick="logout()">Sign Out</button>
         </div>
       </div>
-     <div class="tab-bar">
-        <button class="tab-btn active" data-page="shift">Fuel Shift</button>
-        <button class="tab-btn" data-page="transfers">Transfers</button>
+
+      <div class="tab-bar">
+        <button class="tab-btn active" data-page="shift">
+          Fuel Shift
+        </button>
+
+        <button class="tab-btn" data-page="transfers">
+          Transfers
+        </button>
 
         <button class="tab-btn management-only" data-page="production">
           Production
@@ -59,14 +72,23 @@
         <button class="tab-btn admin-only" data-page="users">
           Users &amp; Backup
         </button>
+
         <button class="tab-btn admin-only" data-page="audit">
           Audit Log
         </button>
       </div>
+
       <main class="wrap">
         <div id="globalMsg"></div>
+
+        <!-- ============================================================
+             FUEL SHIFT
+             ============================================================ -->
+
         <section id="shift" class="tabPage">
+
           <!-- 1. OPEN / LOAD SHIFT -->
+
           <div class="card">
             <div class="section-head">
               <span class="dot"></span>
@@ -74,6 +96,7 @@
             </div>
 
             <div class="grid">
+
               <div>
                 <label>Vessel</label>
                 <select id="shiftVessel"></select>
@@ -94,8 +117,35 @@
 
               <div>
                 <label>Opening Fuel (L)</label>
-                <input id="openingFuel" type="number" min="0" step="0.001" readonly>
+                <input
+                  id="openingFuel"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  readonly
+                >
               </div>
+
+              <div>
+                <label>Advancement (m)</label>
+                <input
+                  id="advancementM"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                >
+              </div>
+
+              <div>
+                <label>Dredging Hours (hr)</label>
+                <input
+                  id="dredgingHours"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                >
+              </div>
+
             </div>
 
             <div class="flex mt8">
@@ -103,18 +153,32 @@
                 Open / Load Shift
               </button>
 
-              <button class="btn btn-ghost manager-only" onclick="establishInitialOpening()">
+              <button
+                class="btn btn-ghost manager-only"
+                onclick="establishInitialOpening()"
+              >
                 Set Initial Opening
               </button>
 
-              <button class="btn btn-ghost" onclick="loadShiftReport()">
+              <button
+                class="btn btn-ghost"
+                onclick="saveShiftProductionData()"
+              >
+                Save Shift Data
+              </button>
+
+              <button
+                class="btn btn-ghost"
+                onclick="loadShiftReport()"
+              >
                 Refresh Report
               </button>
             </div>
 
             <div class="note">
-              Opening fuel is automatically carried forward from the previous shift.
-              Only a Manager or Administrator may establish the first-ever Morning opening.
+              Opening fuel is automatically carried forward from the previous
+              shift. Only a Manager or Administrator may establish the
+              first-ever Morning opening.
             </div>
 
             <div id="shiftState" class="mt8"></div>
@@ -122,6 +186,7 @@
 
 
           <!-- 2. FUEL RECEIVED -->
+
           <div class="card">
             <div class="section-head">
               <span class="dot"></span>
@@ -129,14 +194,23 @@
             </div>
 
             <div class="grid">
+
               <div>
                 <label>Quantity (L)</label>
-                <input id="receiptQty" type="number" min="0" step="0.001">
+                <input
+                  id="receiptQty"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                >
               </div>
 
               <div>
                 <label>Fuel Received From</label>
-                <select id="receiptSourceSelect" onchange="toggleManualFuelSource()">
+                <select
+                  id="receiptSourceSelect"
+                  onchange="toggleManualFuelSource()"
+                >
                   <option value="">Select source</option>
                   <option value="__MANUAL__">Other / Manual</option>
                 </select>
@@ -144,23 +218,30 @@
 
               <div id="manualFuelSourceWrap" class="hidden">
                 <label>Source Name</label>
-                <input id="receiptSourceManual"
-                      placeholder="Supplier, depot, barge or other source">
+                <input
+                  id="receiptSourceManual"
+                  placeholder="Supplier, depot, barge or other source"
+                >
               </div>
 
               <div>
                 <label>Remarks</label>
                 <input id="receiptRemarks">
               </div>
+
             </div>
 
-            <button class="btn btn-primary mt8" onclick="addReceipt()">
+            <button
+              class="btn btn-primary mt8"
+              onclick="addReceipt()"
+            >
               Record Fuel Received
             </button>
           </div>
 
 
           <!-- 3. ENGINE CONSUMPTION -->
+
           <div class="card">
             <div class="section-head">
               <span class="dot"></span>
@@ -168,6 +249,7 @@
             </div>
 
             <div class="grid">
+
               <div>
                 <label>Equipment</label>
                 <select id="engineEquipment"></select>
@@ -175,44 +257,62 @@
 
               <div>
                 <label>Start</label>
-                <input id="engineStart" type="datetime-local"
-                      oninput="calculateEngineRate()">
+                <input
+                  id="engineStart"
+                  type="datetime-local"
+                  oninput="calculateEngineRate()"
+                >
               </div>
 
               <div>
                 <label>Stop</label>
-                <input id="engineStop" type="datetime-local"
-                      oninput="calculateEngineRate()">
+                <input
+                  id="engineStop"
+                  type="datetime-local"
+                  oninput="calculateEngineRate()"
+                >
               </div>
 
               <div>
                 <label>Consumption (L)</label>
-                <input id="engineConsumption" type="number"
-                      min="0" step="0.001"
-                      oninput="calculateEngineRate()">
+                <input
+                  id="engineConsumption"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  oninput="calculateEngineRate()"
+                >
               </div>
 
               <div>
                 <label>Calculated L/hr</label>
-                <input id="engineLphCalculated" type="number"
-                      readonly>
+                <input
+                  id="engineLphCalculated"
+                  type="number"
+                  readonly
+                >
               </div>
 
               <div>
                 <label>Remarks</label>
                 <input id="engineRemarks">
               </div>
+
             </div>
 
             <div id="engineCalculation" class="note hidden"></div>
 
-            <button class="btn btn-primary mt8" onclick="addEngine()">
+            <button
+              class="btn btn-primary mt8"
+              onclick="addEngine()"
+            >
               Add Engine Event
             </button>
           </div>
 
 
           <!-- 4. ATTACHMENTS -->
+
           <div class="card">
             <div class="section-head">
               <span class="dot"></span>
@@ -223,48 +323,78 @@
 
               <div class="attachment-item">
                 <label>Bill</label>
-                <input id="billFile" type="file"
-                      accept="image/*,.pdf">
-                <button class="btn btn-ghost btn-sm mt8"
-                        onclick="uploadShiftAttachment('bill')">
+                <input
+                  id="billFile"
+                  type="file"
+                  accept="image/*,.pdf"
+                >
+
+                <button
+                  class="btn btn-ghost btn-sm mt8"
+                  onclick="uploadShiftAttachment('bill')"
+                >
                   Upload Bill
                 </button>
               </div>
 
+
               <div class="attachment-item">
                 <label>Transfer Note</label>
-                <input id="transferNoteFile" type="file"
-                      accept="image/*,.pdf">
-                <button class="btn btn-ghost btn-sm mt8"
-                        onclick="uploadShiftAttachment('transfer_note')">
+                <input
+                  id="transferNoteFile"
+                  type="file"
+                  accept="image/*,.pdf"
+                >
+
+                <button
+                  class="btn btn-ghost btn-sm mt8"
+                  onclick="uploadShiftAttachment('transfer_note')"
+                >
                   Upload Transfer Note
                 </button>
               </div>
 
+
+              <!-- SOUNDING REMAINS IN THE SHIFT ATTACHMENT SECTION -->
+
               <div class="attachment-item">
                 <label>Sounding Photo *</label>
-                <input id="soundingFile" type="file"
-                      accept="image/*">
-                <button class="btn btn-ghost btn-sm mt8"
-                        onclick="uploadShiftAttachment('sounding')">
+
+                <input
+                  id="soundingFile"
+                  type="file"
+                  accept="image/*"
+                >
+
+                <button
+                  class="btn btn-ghost btn-sm mt8"
+                  onclick="uploadShiftAttachment('sounding')"
+                >
                   Upload Sounding
                 </button>
               </div>
 
             </div>
 
-            <div id="attachmentList" class="table-wrap mt8"></div>
+            <div
+              id="attachmentList"
+              class="table-wrap mt8"
+            ></div>
           </div>
 
 
           <!-- 5. CLOSE SHIFT -->
+
           <div class="card">
             <div class="section-head">
               <span class="dot"></span>
               5 — Close Shift
             </div>
 
-            <div id="shiftReport" class="table-wrap"></div>
+            <div
+              id="shiftReport"
+              class="table-wrap"
+            ></div>
 
             <hr>
 
@@ -273,217 +403,423 @@
               Events Entered During Shift
             </div>
 
-            <div id="shiftEvents" class="table-wrap"></div>
+            <div
+              id="shiftEvents"
+              class="table-wrap"
+            ></div>
 
-            <button class="btn btn-warn mt8"
-                    onclick="closeShift()">
+            <button
+              class="btn btn-warn mt8"
+              onclick="closeShift()"
+            >
               Close Shift
             </button>
           </div>
 
         </section>
+
+
+        <!-- ============================================================
+             TRANSFERS
+             ============================================================ -->
+
         <section id="transfers" class="tabPage hidden">
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Initiate transfer
+              <span class="dot"></span>
+              Initiate transfer
             </div>
+
             <div class="note">
-              The current open shift for each vessel will be selected automatically
+              The current open shift for each vessel will be selected
+              automatically
             </div>
+
             <div class="grid">
-                <div>
-                  <label>Source vessel</label>
-                  <select id="transferFrom"></select>
-                </div>
 
-                <div>
-                  <label>Destination vessel</label>
-                  <select id="transferTo"></select>
-                </div>
-
-                <div>
-                  <label>Shift</label>
-                  <select id="transferShift">
-                    <option value="">Auto — Current Shift</option>
-                    <option value="MORNING">Morning</option>
-                    <option value="EVENING">Evening</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label>Initiated litres</label>
-                  <input id="transferQty" type="number" min="0" step="0.001" />
-                </div>
-
-                <div>
-                  <label>Notes</label>
-                  <input id="transferNotes" />
-                </div>
+              <div>
+                <label>Source vessel</label>
+                <select id="transferFrom"></select>
               </div>
-            <button class="btn btn-primary mt8" onclick="createTransfer()">
+
+              <div>
+                <label>Destination vessel</label>
+                <select id="transferTo"></select>
+              </div>
+
+              <div>
+                <label>Shift</label>
+                <select id="transferShift">
+                  <option value="">Auto — Current Shift</option>
+                  <option value="MORNING">Morning</option>
+                  <option value="EVENING">Evening</option>
+                </select>
+              </div>
+
+              <div>
+                <label>Initiated litres</label>
+                <input
+                  id="transferQty"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                />
+              </div>
+
+              <div>
+                <label>Notes</label>
+                <input id="transferNotes" />
+              </div>
+
+            </div>
+
+            <button
+              class="btn btn-primary mt8"
+              onclick="createTransfer()"
+            >
               Initiate transfer
             </button>
           </div>
+
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Transfer register
+              <span class="dot"></span>
+              Transfer register
             </div>
-            <div id="transferList" class="table-wrap"></div>
+
+            <div
+              id="transferList"
+              class="table-wrap"
+            ></div>
           </div>
+
         </section>
+
+
+        <!-- ============================================================
+             PRODUCTION
+             ============================================================ -->
+
         <section id="production" class="tabPage hidden">
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Production entry
+              <span class="dot"></span>
+              Production entry
             </div>
+
             <div class="grid">
+
               <div>
-                <label>Date</label><input id="productionDate" type="date" />
+                <label>Date</label>
+                <input
+                  id="productionDate"
+                  type="date"
+                />
               </div>
+
               <div>
-                <label>Project</label
-                ><select id="productionProject"></select>
+                <label>Project</label>
+                <select id="productionProject"></select>
               </div>
+
               <div>
-                <label>Vessel</label
-                ><select id="productionVessel"></select>
+                <label>Vessel</label>
+                <select id="productionVessel"></select>
               </div>
+
               <div>
-                <label>Shift ID</label
-                ><input id="productionShift" type="number" />
+                <label>Shift ID</label>
+                <input
+                  id="productionShift"
+                  type="number"
+                />
               </div>
+
               <div>
-                <label>As-per quantity (m³)</label
-                ><input id="productionAs" type="number" min="0" step="0.001" />
+                <label>As-per quantity (m³)</label>
+                <input
+                  id="productionAs"
+                  type="number"
+                  min="0"
+                  step="0.001"
+                />
               </div>
+
               <div>
-                <label>True quantity (m³)</label
-                ><input
+                <label>True quantity (m³)</label>
+                <input
                   id="productionTrue"
                   type="number"
                   min="0"
                   step="0.001"
                 />
               </div>
+
               <div>
-                <label>Fuel rate</label
-                ><input
+                <label>Fuel rate</label>
+                <input
                   id="productionRate"
                   type="number"
                   min="0"
                   step="0.001"
                 />
               </div>
-              <div><label>Remarks</label><input id="productionRemarks" /></div>
+
+              <div>
+                <label>Remarks</label>
+                <input id="productionRemarks" />
+              </div>
+
             </div>
-            <button class="btn btn-primary mt8" onclick="saveProduction()">
+
+            <button
+              class="btn btn-primary mt8"
+              onclick="saveProduction()"
+            >
               Save production
             </button>
           </div>
+
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Production records
+              <span class="dot"></span>
+              Production records
             </div>
-            <div id="productionList" class="table-wrap"></div>
+
+            <div
+              id="productionList"
+              class="table-wrap"
+            ></div>
           </div>
+
         </section>
+
+
+        <!-- ============================================================
+             SOUNDINGS — VIEW / STATUS ONLY
+             ============================================================ -->
+
         <section id="soundings" class="tabPage hidden">
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Sounding attachment
+              <span class="dot"></span>
+              Shift Soundings
             </div>
+
             <div class="grid">
+
               <div>
-                <label>Vessel</label
-                ><select id="soundingVessel"></select>
+                <label>Vessel</label>
+                <select id="soundingVessel"></select>
               </div>
+
               <div>
-                <label>Report date</label
-                ><input id="soundingDate" type="date" />
+                <label>Shift Date</label>
+                <input
+                  id="soundingDate"
+                  type="date"
+                />
               </div>
+
               <div>
-                <label>Photo / document</label
-                ><input id="soundingFile" type="file" accept="image/*,.pdf" />
+                <label>Shift</label>
+                <select id="soundingShift">
+                  <option value="">Select shift</option>
+                  <option value="MORNING">Morning</option>
+                  <option value="EVENING">Evening</option>
+                </select>
               </div>
+
             </div>
-            <button class="btn btn-primary mt8" onclick="uploadSounding()">
-              Upload and submit sounding
+
+            <button
+              class="btn btn-primary mt8"
+              onclick="loadSoundingShift()"
+            >
+              Load Shift
             </button>
-            <div id="soundingStatus" class="mt8"></div>
+
+            <div
+              id="soundingStatus"
+              class="mt8"
+            ></div>
           </div>
+
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Missing / due soundings
+              <span class="dot"></span>
+              Soundings for Selected Shift
             </div>
-            <div id="missingList" class="table-wrap"></div>
+
+            <div
+              id="soundingList"
+              class="table-wrap"
+            ></div>
           </div>
+
+
+          <div class="card">
+            <div class="section-head">
+              <span class="dot"></span>
+              Missing / Due Soundings
+            </div>
+
+            <div
+              id="missingList"
+              class="table-wrap"
+            ></div>
+          </div>
+
         </section>
+
+
+        <!-- ============================================================
+             DASHBOARD
+             ============================================================ -->
+
         <section id="dashboard" class="tabPage hidden">
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Fuel dashboard
+              <span class="dot"></span>
+              Fuel dashboard
             </div>
+
             <div class="grid">
-              <div><label>From</label><input id="dashFrom" type="date" /></div>
-              <div><label>To</label><input id="dashTo" type="date" /></div>
+
               <div>
-                <label>Vessel (optional)</label
-                ><select id="dashVessel">
+                <label>From</label>
+                <input
+                  id="dashFrom"
+                  type="date"
+                />
+              </div>
+
+              <div>
+                <label>To</label>
+                <input
+                  id="dashTo"
+                  type="date"
+                />
+              </div>
+
+              <div>
+                <label>Vessel (optional)</label>
+                <select id="dashVessel">
                   <option value="">All vessels</option>
                 </select>
               </div>
+
               <div>
-                <label>Shift (optional)</label
-                ><select id="dashShift">
+                <label>Shift (optional)</label>
+                <select id="dashShift">
                   <option value="">All shifts</option>
                   <option value="MORNING">Morning</option>
                   <option value="EVENING">Evening</option>
                 </select>
               </div>
+
             </div>
+
             <div class="flex mt8">
-              <button class="btn btn-primary" onclick="loadDashboard()">
-                Apply</button
-              ><button class="btn btn-ghost" onclick="downloadExport('csv')">
-                CSV</button
-              ><button class="btn btn-ghost" onclick="downloadExport('excel')">
-                Excel</button
-              ><button class="btn btn-ghost" onclick="downloadExport('pdf')">
+
+              <button
+                class="btn btn-primary"
+                onclick="loadDashboard()"
+              >
+                Apply
+              </button>
+
+              <button
+                class="btn btn-ghost"
+                onclick="downloadExport('csv')"
+              >
+                CSV
+              </button>
+
+              <button
+                class="btn btn-ghost"
+                onclick="downloadExport('excel')"
+              >
+                Excel
+              </button>
+
+              <button
+                class="btn btn-ghost"
+                onclick="downloadExport('pdf')"
+              >
                 PDF
               </button>
+
             </div>
           </div>
-          <div id="kpis" class="kpi-grid"></div>
+
+
+          <div
+            id="kpis"
+            class="kpi-grid"
+          ></div>
+
+
           <div class="grid2">
+
             <div class="card">
               <div class="section-head">
-                <span class="dot"></span>Vessel balances
+                <span class="dot"></span>
+                Vessel balances
               </div>
-              <div id="balancesTable" class="table-wrap"></div>
+
+              <div
+                id="balancesTable"
+                class="table-wrap"
+              ></div>
             </div>
+
+
             <div class="card">
               <div class="section-head">
-                <span class="dot"></span>Efficiency
+                <span class="dot"></span>
+                Efficiency
               </div>
+
               <div id="efficiencyView"></div>
             </div>
+
           </div>
+
+
           <div class="card">
             <div class="section-head">
-              <span class="dot"></span>Shift balances
+              <span class="dot"></span>
+              Shift balances
             </div>
-            <div id="dashboardTable" class="table-wrap"></div>
+
+            <div
+              id="dashboardTable"
+              class="table-wrap"
+            ></div>
           </div>
+
         </section>
+
+
+        <!-- ============================================================
+             CHARTS
+             ============================================================ -->
+
         <section id="charts" class="tabPage hidden">
-          <!-- ========================================================
-              CHART FILTERS
-              ======================================================== -->
 
           <div class="card">
 
             <div class="section-head">
-              <span class="dot"></span>Fuel Analytics
+              <span class="dot"></span>
+              Fuel Analytics
             </div>
 
             <div class="note">
@@ -495,12 +831,18 @@
 
               <div>
                 <label>From Date</label>
-                <input id="chartFrom" type="date" />
+                <input
+                  id="chartFrom"
+                  type="date"
+                />
               </div>
 
               <div>
                 <label>To Date</label>
-                <input id="chartTo" type="date" />
+                <input
+                  id="chartTo"
+                  type="date"
+                />
               </div>
 
               <div>
@@ -515,48 +857,50 @@
             </div>
 
 
-            <!-- ======================================================
-                VESSEL MULTI SELECT
-                ====================================================== -->
+            <!-- VESSEL MULTI SELECT -->
 
             <div class="mt8">
 
               <label>Vessels</label>
 
-                <div class="section-head">
-                  <span class="dot"></span>
-                  SELECT VESSELS
-                </div>
+              <div class="section-head">
+                <span class="dot"></span>
+                SELECT VESSELS
+              </div>
 
-                <div class="chart-vessel-toolbar">
-                  <button
-                    type="button"
-                    class="btn btn-sm"
-                    onclick="selectAllChartVessels()"
-                  >
-                    Select All
-                  </button>
+              <div class="chart-vessel-toolbar">
 
-                  <button
-                    type="button"
-                    class="btn btn-sm"
-                    onclick="clearChartVessels()"
-                  >
-                    Clear All
-                  </button>
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  onclick="selectAllChartVessels()"
+                >
+                  Select All
+                </button>
 
-                  <span
-                    id="chartVesselSummary"
-                    class="muted"
-                  >
-                    No vessels selected.
-                  </span>
-                </div>
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  onclick="clearChartVessels()"
+                >
+                  Clear All
+                </button>
 
-                <div
-                  id="chartVesselChecks"
-                  class="chart-vessel-checks"
-                ></div>
+                <span
+                  id="chartVesselSummary"
+                  class="muted"
+                >
+                  No vessels selected.
+                </span>
+
+              </div>
+
+              <div
+                id="chartVesselChecks"
+                class="chart-vessel-checks"
+              ></div>
+
+            </div>
 
 
             <div class="flex mt8">
@@ -573,27 +917,42 @@
           </div>
 
 
-          <!-- ========================================================
-              CHART OUTPUT
-              ======================================================== -->
+          <!-- CHART OUTPUT -->
 
           <div id="chartArea"></div>
 
         </section>
+
+
+        <!-- ============================================================
+             MASTERS
+             ============================================================ -->
+
         <section id="masters" class="tabPage hidden">
+
           <!-- PROJECTS -->
+
           <div class="card">
+
             <div class="section-head">
               <span class="dot"></span>
               Projects
-              <button class="btn btn-sm btn-success" onclick="addProject()">
+
+              <button
+                class="btn btn-sm btn-success"
+                onclick="addProject()"
+              >
                 + Add Project
               </button>
             </div>
 
-            <div id="projectsList" class="table-wrap"></div>
+            <div
+              id="projectsList"
+              class="table-wrap"
+            ></div>
 
             <div class="grid mt8">
+
               <div>
                 <label>Project name</label>
                 <input id="masterProjectName" />
@@ -603,64 +962,90 @@
                 <label>Project code</label>
                 <input id="masterProjectCode" />
               </div>
+
             </div>
 
             <button
               class="btn btn-primary mt8"
-              onclick="createProject()">
+              onclick="createProject()"
+            >
               Add Project
             </button>
+
+          </div>
+
+
+          <!-- SITES -->
+
+          <div class="card">
+
+            <div class="section-head">
+              <span class="dot"></span>
+              Sites
+
+              <button
+                class="btn btn-sm btn-success"
+                onclick="addSite()"
+              >
+                + Add Site
+              </button>
+            </div>
+
+            <div
+              id="sitesList"
+              class="table-wrap"
+            ></div>
+
           </div>
 
 
           <!-- VESSELS -->
+
           <div class="card">
+
             <div class="section-head">
               <span class="dot"></span>
               Vessels
-              <button class="btn btn-sm btn-success" onclick="addVessel()">
+
+              <button
+                class="btn btn-sm btn-success"
+                onclick="addVessel()"
+              >
                 + Add Vessel
               </button>
             </div>
 
-            <div id="vesselsList" class="table-wrap"></div>
-            <div class="grid mt8">
-              <div>
-                <label>Vessel name</label>
-                <input id="masterVesselName" />
-              </div>
+            <div
+              id="vesselsList"
+              class="table-wrap"
+            ></div>
 
-              <div>
-                <label>Vessel type</label>
-                <input id="masterVesselType" />
-              </div>
-
-              <div>
-                <label>Project</label>
-                <select id="masterVesselProject"></select>
-              </div>
-            </div>
-
-            <button
-              class="btn btn-primary mt8"
-              onclick="createVessel()">
-              Add Vessel
-            </button>
           </div>
 
 
           <!-- EQUIPMENT -->
+
           <div class="card">
+
             <div class="section-head">
               <span class="dot"></span>
               Equipment
-              <button class="btn btn-sm btn-success" onclick="addEquipment()">
+
+              <button
+                class="btn btn-sm btn-success"
+                onclick="addEquipment()"
+              >
                 + Add Equipment
               </button>
             </div>
 
-            <div id="equipmentList" class="table-wrap"></div>
+            <div
+              id="equipmentList"
+              class="table-wrap"
+            ></div>
+
             <div class="grid mt8">
+
               <div>
                 <label>Equipment name</label>
                 <input id="masterEquipmentName" />
@@ -684,23 +1069,30 @@
                 <label>Vessel</label>
                 <select id="masterEquipmentVessel"></select>
               </div>
+
             </div>
 
             <button
               class="btn btn-primary mt8"
-              onclick="createEquipment()">
+              onclick="createEquipment()"
+            >
               Add Equipment
             </button>
+
           </div>
 
 
           <!-- VESSEL THRESHOLD -->
+
           <div class="card">
+
             <div class="section-head">
-              <span class="dot"></span>Fuel Threshold
+              <span class="dot"></span>
+              Fuel Threshold
             </div>
 
             <div class="grid">
+
               <div>
                 <label>Vessel</label>
                 <select id="masterThresholdVessel"></select>
@@ -708,6 +1100,7 @@
 
               <div>
                 <label>Low fuel threshold (L)</label>
+
                 <input
                   id="masterThresholdValue"
                   type="number"
@@ -715,46 +1108,83 @@
                   step="0.001"
                 />
               </div>
+
             </div>
 
             <button
               class="btn btn-warn mt8"
-              onclick="updateVesselThreshold()">
+              onclick="updateVesselThreshold()"
+            >
               Set Threshold
             </button>
+
           </div>
 
         </section>
-        <section id="users" class="tabPage">
+
+
+        <!-- ============================================================
+             USERS
+             ============================================================ -->
+
+        <section id="users" class="tabPage hidden">
+
           <div class="card">
+
             <div class="section-head">
               <span class="dot"></span>
               USERS
             </div>
 
             <div class="flex mt8">
-              <button class="btn btn-primary" onclick="addUser()">
+
+              <button
+                class="btn btn-primary"
+                onclick="addUser()"
+              >
                 + Add User
               </button>
+
             </div>
 
-            <div id="usersList" class="table-wrap mt8"></div>
+            <div
+              id="usersList"
+              class="table-wrap mt8"
+            ></div>
+
           </div>
 
+
           <div class="card">
+
             <div class="section-head">
               <span class="dot"></span>
               DATABASE BACKUP
             </div>
 
-            <button class="btn btn-primary" onclick="createBackup()">
+            <button
+              class="btn btn-primary"
+              onclick="createBackup()"
+            >
               CREATE BACKUP
             </button>
 
-            <div id="backupsList" class="table-wrap mt8"></div>
+            <div
+              id="backupsList"
+              class="table-wrap mt8"
+            ></div>
+
           </div>
+
         </section>
+
+
+        <!-- ============================================================
+             AUDIT
+             ============================================================ -->
+
         <section id="audit" class="tabPage hidden">
+
           <!-- AUDIT FILTERS -->
 
           <div class="card">
@@ -773,6 +1203,7 @@
 
               <div>
                 <label>Action</label>
+
                 <input
                   id="auditAction"
                   type="text"
@@ -782,6 +1213,7 @@
 
               <div>
                 <label>Entity</label>
+
                 <input
                   id="auditEntity"
                   type="text"
@@ -791,6 +1223,7 @@
 
               <div>
                 <label>User</label>
+
                 <select id="auditUser">
                   <option value="">All users</option>
                 </select>
@@ -798,6 +1231,7 @@
 
               <div>
                 <label>Entity ID</label>
+
                 <input
                   id="auditEntityId"
                   type="number"
@@ -807,6 +1241,7 @@
               </div>
 
             </div>
+
 
             <div class="flex mt8">
 
@@ -863,8 +1298,10 @@
           </div>
 
         </section>
+
       </main>
     </div>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="/ui/js/app.js"></script>
   </body>

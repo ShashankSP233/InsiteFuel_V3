@@ -10,8 +10,12 @@ from backend.utils.time import now_ist
 class Sounding(Base):
     __tablename__ = "soundings"
 
-    id: Mapped[int] = mapped_column(
-        primary_key=True,
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    shift_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shifts.id"),
+        nullable=True,
+        index=True,
     )
 
     vessel_id: Mapped[int] = mapped_column(

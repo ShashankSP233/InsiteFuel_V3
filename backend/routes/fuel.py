@@ -12,12 +12,13 @@ from backend.schemas.fuel import (
     FuelTransactionCreate,
     FuelTransactionResponse,
     InitialOpeningFuelCreate,
+    OpeningFuelCorrection,
     ShiftBalanceResponse,
     ShiftCloseResponse,
     ShiftOpenRequest,
+    ShiftProductionDataUpdate,
     ShiftReportResponse,
     ShiftResponse,
-    OpeningFuelCorrection,
 )
 from backend.services.fuel_service import FuelService
 
@@ -225,6 +226,38 @@ def close_shift(
         shift = FuelService.close_shift(
             db=db,
             shift_id=shift_id,
+        )
+
+        db.commit()
+        db.refresh(shift)
+
+        return shift
+
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+
+@router.put(
+    "/shift/{shift_id}/production-data",
+    response_model=ShiftResponse,
+)
+def update_shift_production_data(
+    shift_id: int,
+    payload: ShiftProductionDataUpdate,
+    db: Session = Depends(db_session),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        shift = FuelService.update_shift_production_data(
+            db=db,
+            shift_id=shift_id,
+            advancement_m=payload.advancement_m,
+            dredging_hours=payload.dredging_hours,
+            updated_by_user_id=current_user.id,
         )
 
         db.commit()

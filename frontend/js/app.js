@@ -8,10 +8,12 @@ const $ = (id) => document.getElementById(id),
       : n(v).toLocaleString(undefined, { maximumFractionDigits: 3 });
 let me,
   projects = [],
+  sites = [],
   vessels = [],
   equipment = [],
   currentUsers = [],
   activeShift;
+
 const token = () => sessionStorage.getItem("insitefuel.session");
 const esc = (s) =>
   String(s ?? "").replace(
@@ -177,6 +179,23 @@ async function init() {
   await loadDashboard();
 }
 
+function clearShiftProductionFields() {
+  $("advancementM").value = "";
+  $("dredgingHours").value = "";
+}
+
+function populateShiftProductionFields() {
+  if (!activeShift) {
+    clearShiftProductionFields();
+    return;
+  }
+
+  $("advancementM").value =
+    activeShift.advancement_m == null ? "" : String(activeShift.advancement_m);
+  $("dredgingHours").value =
+    activeShift.dredging_hours == null ? "" : String(activeShift.dredging_hours);
+}
+
 function toggleManualFuelSource() {
   const selectEl = $("receiptSourceSelect");
   const wrap = $("manualFuelSourceWrap");
@@ -192,26 +211,37 @@ function toggleManualFuelSource() {
 }
 
 function populateFuelSources() {
-  const el = $("receiptSourceSelect");
-  if (!el) return;
+  const sel = $("receiptSourceSelect");
+  if (!sel) return;
 
-  el.innerHTML =
-    `<option value="">Select source</option>` +
-    vessels
-      .filter((v) => v.is_active !== false)
-      .map(
-        (v) =>
-          `<option value="vessel:${v.id}">
-            ${esc(v.name)}
-          </option>`,
-      )
-      .join("") +
-    `<option value="__MANUAL__">Other / Manual</option>`;
+  sel.innerHTML = '<option value="">Select source</option>';
+
+  vessels
+    .filter(v => v.is_active !== false)
+    .forEach(v => {
+      const option = document.createElement("option");
+
+      option.value = `vessel:${v.id}`;
+
+      option.textContent = v.project_name
+        ? `${v.name} (${v.project_name})`
+        : v.name;
+
+      sel.appendChild(option);
+    });
+
+  const manual = document.createElement("option");
+  manual.value = "__MANUAL__";
+  manual.textContent = "Other / Manual";
+  sel.appendChild(manual);
+
+  toggleManualFuelSource();
 }
 
 async function loadMaster() {
-  [projects, vessels, equipment] = await Promise.all([
+  [projects, sites, vessels, equipment, ] = await Promise.all([
     api("/api/projects"),
+    api("/api/sites"),
     api("/api/vessels"),
     api("/api/equipment"),
   ]);
@@ -220,6 +250,7 @@ async function loadMaster() {
   select("shiftVessel", vessels);
   select("transferFrom", vessels);
   select("transferTo", vessels);
+  populateFuelSources();
   select("productionVessel", vessels);
   select("soundingVessel", vessels);
   select("dashVessel", vessels, "name", true);
@@ -378,16 +409,6 @@ async function updateVesselThreshold() {
   }
 }
 
-async function refreshShiftEquipment() {
-  const v = $("shiftVessel").value;
-  select(
-    "engineEquipment",
-    equipment.filter((x) => String(x.vessel_id) === String(v)),
-  );
-  activeShift = undefined;
-  $("shiftReport").innerHTML = "";
-  $("shiftState").textContent = "Select a shift, then open or load it.";
-}
 async function openShift() {
   try {
     const body = {
@@ -406,6 +427,7 @@ async function openShift() {
     }
     activeShift = s;
     $("openingFuel").value = s.opening_fuel;
+    populateShiftProductionFields();
     $("shiftState").textContent =
       `Shift #${s.id} · ${s.status} · opening ${f(s.opening_fuel)} L`;
 
@@ -449,6 +471,7 @@ async function refreshShiftEquipment() {
   activeShift = undefined;
   $("shiftReport").innerHTML = "";
   $("attachmentList").innerHTML = "";
+  clearShiftProductionFields();
   $("shiftState").textContent = "Select a shift, then open or load it.";
 }
 async function loadShiftReport() {
@@ -457,6 +480,7 @@ async function loadShiftReport() {
 
     const r = await api(`/api/fuel/shift/${activeShift.id}/report`);
     activeShift = r.shift;
+    populateShiftProductionFields();
 
     const b = r.balance;
     const transactions = r.transactions || [];
@@ -470,6 +494,8 @@ async function loadShiftReport() {
         "Engine use",
         "Transfer out",
         "Adjustments",
+        "Advancement",
+        "Dredging hours",
         "Closing",
       ],
       [
@@ -480,6 +506,8 @@ async function loadShiftReport() {
           f(b.engine_consumption),
           f(b.transfer_out),
           `${f(b.adjustment_in)} / ${f(b.adjustment_out)}`,
+          activeShift.advancement_m == null ? "—" : f(activeShift.advancement_m),
+          activeShift.dredging_hours == null ? "—" : f(activeShift.dredging_hours),
           f(b.closing_fuel),
         ],
       ],
@@ -527,6 +555,45 @@ async function loadShiftReport() {
     message(e.message, "error");
   }
 }
+async function saveShiftProductionData() {
+  try {
+    if (!activeShift) {
+      throw Error("Open or load a shift first.");
+    }
+
+    if (activeShift.status !== "OPEN") {
+      throw Error("Only an OPEN shift can be updated.");
+    }
+
+    const rawAdvancement = $("advancementM").value.trim();
+    const rawDredgingHours = $("dredgingHours").value.trim();
+
+    const advancement = rawAdvancement === "" ? null : Number(rawAdvancement);
+    const dredgingHours = rawDredgingHours === "" ? null : Number(rawDredgingHours);
+
+    if (advancement !== null && advancement < 0) {
+      throw Error("Advancement cannot be negative.");
+    }
+
+    if (dredgingHours !== null && dredgingHours < 0) {
+      throw Error("Dredging hours cannot be negative.");
+    }
+
+    await api(`/api/fuel/shift/${activeShift.id}/production-data`, {
+      method: "PUT",
+      body: JSON.stringify({
+        advancement_m: advancement,
+        dredging_hours: dredgingHours,
+      }),
+    });
+
+    message("Shift production data saved.", "success");
+    await loadShiftReport();
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
 async function addReceipt() {
   try {
     if (!activeShift) {
@@ -953,29 +1020,9 @@ async function loadProduction() {
     ]),
   );
 }
-async function uploadSounding() {
-  try {
-    const file = $("soundingFile").files[0];
-    if (!file) throw Error("Choose a photo or document first.");
-    const data = new FormData();
-    data.append("file", file);
-    const attachment = await api("/api/attachments/upload", {
-      method: "POST",
-      body: data,
-    });
-    await api(
-      `/api/soundings?${params({ vessel_id: $("soundingVessel").value, report_date: $("soundingDate").value, attachment_id: attachment.id })}`,
-      { method: "POST" },
-    );
-    message("Sounding uploaded and submitted.", "success");
-    await loadSoundings();
-  } catch (e) {
-    message(e.message, "error");
-  }
-}
 async function uploadShiftAttachment(type) {
   try {
-    if (!activeShift) {
+    if (!activeShift?.id) {
       throw Error("Open or load a shift first.");
     }
 
@@ -985,51 +1032,225 @@ async function uploadShiftAttachment(type) {
       sounding: "soundingFile",
     };
 
-    const typeMap = {
-      bill: "BILL",
-      transfer_note: "TRANSFER_NOTE",
-      sounding: "SOUNDING",
-    };
+    const inputId = inputMap[type];
 
-    const input = $(inputMap[type]);
+    if (!inputId) {
+      throw Error("Invalid attachment type.");
+    }
 
-    if (!input || !input.files[0]) {
+    const file = $(inputId)?.files?.[0];
+
+    if (!file) {
       throw Error("Choose a file first.");
     }
 
-    const file = input.files[0];
+    // =========================================================
+    // SOUNDING
+    // =========================================================
+    // Soundings are real Sounding records.
+    if (type === "sounding") {
+      const soundingList = await api(
+        `/api/soundings?shift_id=${activeShift.id}`,
+      );
 
-    // Step 1: upload the physical file
-    const data = new FormData();
-    data.append("file", file);
+      if (soundingList.length >= 5) {
+        throw Error(
+          "This shift already has the maximum of 5 soundings.",
+        );
+      }
 
-    const attachment = await api("/api/attachments/upload", {
-      method: "POST",
-      body: data,
-    });
+      const allowedTypes = [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ];
 
-    // Step 2: associate the uploaded file with this shift
-    await api(`/api/shifts/${activeShift.id}/attachments`, {
-      method: "POST",
-      body: JSON.stringify({
-        attachment_id: attachment.id,
-        attachment_type: typeMap[type],
-      }),
-    });
+      if (!allowedTypes.includes(file.type)) {
+        throw Error(
+          "Sounding must be a JPEG, PNG, or WebP image.",
+        );
+      }
 
-    message(
-      `${type.replace("_", " ")} attachment uploaded successfully.`,
-      "success",
-    );
+      const data = new FormData();
+      data.append("file", file);
 
-    input.value = "";
+      const attachment = await api(
+        "/api/attachments/upload",
+        {
+          method: "POST",
+          body: data,
+        },
+      );
 
-    // Step 3: refresh the attachment list
-    await loadShiftAttachments();
+      await api(
+        `/api/soundings?${params({
+          shift_id: activeShift.id,
+          attachment_id: attachment.id,
+        })}`,
+        {
+          method: "POST",
+        },
+      );
+
+      $(inputId).value = "";
+
+      message(
+        "Sounding uploaded and submitted.",
+        "success",
+      );
+
+      await loadShiftAttachments();
+      await loadShiftReport();
+
+      return;
+    }
+
+    // =========================================================
+    // BILL
+    // =========================================================
+    if (type === "bill") {
+      const data = new FormData();
+      data.append("file", file);
+
+      const attachment = await api(
+        "/api/attachments/upload",
+        {
+          method: "POST",
+          body: data,
+        },
+      );
+
+      await api(
+        `/api/shifts/${activeShift.id}/attachments`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            attachment_id: attachment.id,
+            attachment_type: "BILL",
+          }),
+        },
+      );
+
+      $(inputId).value = "";
+
+      message("Bill uploaded.", "success");
+
+      await loadShiftAttachments();
+
+      return;
+    }
+
+    // =========================================================
+    // TRANSFER NOTE
+    // =========================================================
+    if (type === "transfer_note") {
+      // First upload the physical file.
+      const data = new FormData();
+      data.append("file", file);
+
+      const attachment = await api(
+        "/api/attachments/upload",
+        {
+          method: "POST",
+          body: data,
+        },
+      );
+
+      // Find transfers associated with this shift.
+      const transfers = await api("/api/transfers");
+
+      const completedTransfers = transfers.filter(
+        (transfer) =>
+          transfer.status === "BALANCES_UPDATED" &&
+          (
+            transfer.from_shift_id === activeShift.id ||
+            transfer.to_shift_id === activeShift.id
+          ),
+      );
+
+      if (!completedTransfers.length) {
+        throw Error(
+          "No completed transfer is associated with this shift.",
+        );
+      }
+
+      // If there is more than one completed transfer,
+      // ask the user which transfer this note belongs to.
+      let transfer;
+
+      if (completedTransfers.length === 1) {
+        transfer = completedTransfers[0];
+      } else {
+        const options = completedTransfers
+          .map(
+            (t, index) =>
+              `${index + 1}. Transfer #${t.id} — ` +
+              `${f(t.initiated_quantity)} L`,
+          )
+          .join("\n");
+
+        const answer = prompt(
+          `Select the transfer this note belongs to:\n\n${options}\n\nEnter the number:`,
+        );
+
+        if (answer === null) {
+          throw Error("Transfer note upload cancelled.");
+        }
+
+        const selectedIndex = Number(answer) - 1;
+
+        if (
+          !Number.isInteger(selectedIndex) ||
+          selectedIndex < 0 ||
+          selectedIndex >= completedTransfers.length
+        ) {
+          throw Error("Invalid transfer selection.");
+        }
+
+        transfer = completedTransfers[selectedIndex];
+      }
+
+      // Check existing notes on this transfer.
+      const existingNotes = await api(
+        `/api/transfers/${transfer.id}/attachments`,
+      );
+
+      if (existingNotes.length >= 5) {
+        throw Error(
+          `Transfer #${transfer.id} already has the maximum of 5 transfer notes.`,
+        );
+      }
+
+      // Link the uploaded Attachment to the FuelTransfer.
+      await api(
+        `/api/transfers/${transfer.id}/attachments`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            attachment_id: attachment.id,
+          }),
+        },
+      );
+
+      $(inputId).value = "";
+
+      message(
+        `Transfer note linked to Transfer #${transfer.id}.`,
+        "success",
+      );
+
+      await loadShiftAttachments();
+
+      return;
+    }
+
+    throw Error("Invalid attachment type.");
+
   } catch (e) {
     message(e.message, "error");
   }
 }
+
 async function viewShiftAttachment(attachmentId) {
   try {
     const response = await fetch(
@@ -1062,6 +1283,7 @@ async function viewShiftAttachment(attachmentId) {
     message(e.message, "error");
   }
 }
+
 async function loadShiftAttachments() {
   const list = $("attachmentList");
 
@@ -1074,56 +1296,261 @@ async function loadShiftAttachments() {
   }
 
   try {
-    const attachments = await api(`/api/shifts/${activeShift.id}/attachments`);
+    // ---------------------------------------------------------
+    // Load normal shift attachments + soundings + transfers
+    // ---------------------------------------------------------
+    const [attachments, soundings, transfers] = await Promise.all([
+      api(`/api/shifts/${activeShift.id}/attachments`),
+      api(`/api/soundings?shift_id=${activeShift.id}`),
+      api("/api/transfers"),
+    ]);
 
-    if (!attachments.length) {
-      list.innerHTML = '<div class="muted">No attachments yet.</div>';
+    const rows = [];
+
+    // =========================================================
+    // NORMAL SHIFT ATTACHMENTS
+    // =========================================================
+    // BILL and any legacy TRANSFER_NOTE attachments remain
+    // visible here.
+    for (const item of attachments) {
+      // Soundings are now real Sounding records.
+      if (item.attachment_type === "SOUNDING") {
+        continue;
+      }
+
+      rows.push({
+        type: item.attachment_type,
+        filename: item.original_filename,
+        attachment_id: item.attachment_id,
+      });
+    }
+
+    // =========================================================
+    // SHIFT SOUNDINGS
+    // =========================================================
+    soundings.forEach((sounding, index) => {
+      rows.push({
+        type: "SOUNDING",
+        filename: `Sounding ${index + 1} of 5`,
+        attachment_id: sounding.attachment_id,
+      });
+    });
+
+    // =========================================================
+    // TRANSFER NOTES
+    // =========================================================
+    // Find completed transfers belonging to this shift.
+    const completedTransfers = transfers.filter(
+      (transfer) =>
+        transfer.status === "BALANCES_UPDATED" &&
+        (
+          Number(transfer.from_shift_id) === Number(activeShift.id) ||
+          Number(transfer.to_shift_id) === Number(activeShift.id)
+        ),
+    );
+
+    // Load notes for every completed transfer belonging to this shift.
+    for (const transfer of completedTransfers) {
+      const transferNotes = await api(
+        `/api/transfers/${transfer.id}/attachments`,
+      );
+
+      transferNotes.forEach((note, index) => {
+        rows.push({
+          type: "TRANSFER NOTE",
+          filename:
+            `Transfer #${transfer.id} — ` +
+            `Note ${index + 1} of 5`,
+          attachment_id: note.attachment_id,
+        });
+      });
+    }
+
+    // =========================================================
+    // NOTHING UPLOADED
+    // =========================================================
+    if (!rows.length) {
+      list.innerHTML =
+        '<div class="muted">No attachments yet.</div>';
       return;
     }
 
-    list.innerHTML = attachments
+    // =========================================================
+    // DISPLAY
+    // =========================================================
+    list.innerHTML = rows
       .map(
         (item) => `
-      <div class="attachment-item">
-        <div>
-          <strong>${item.attachment_type}</strong>
-          <div>${item.original_filename}</div>
-        </div> 
-          <a
-            href="#"
-            onclick="viewShiftAttachment(${item.attachment_id}); return false;"
-          >
-            View
-          </a>
-      </div>
-    `,
+          <div class="attachment-item">
+            <div>
+              <strong>${esc(item.type)}</strong>
+              <div>${esc(item.filename)}</div>
+            </div>
+
+            <a
+              href="#"
+              onclick="viewShiftAttachment(${item.attachment_id}); return false;"
+            >
+              View
+            </a>
+          </div>
+        `,
       )
       .join("");
+
   } catch (e) {
-    list.innerHTML = `<div class="error">${e.message}</div>`;
+    list.innerHTML =
+      `<div class="error">${esc(e.message)}</div>`;
   }
 }
-async function loadSoundings() {
-  const d = $("soundingDate").value;
-  const [missing, status] = await Promise.all([
-    api(`/api/dashboard/missing-soundings?report_date=${d}`),
-    api(
-      `/api/soundings/status?vessel_id=${$("soundingVessel").value}&report_date=${d}`,
-    ),
-  ]);
-  $("soundingStatus").textContent =
-    `Selected vessel: ${status.status} (${status.sounding_count} attachment(s)).`;
-  table(
-    "missingList",
-    ["Vessel", "Date", "Status", "Deadline"],
-    missing.map((x) => [
-      esc(x.vessel_name),
-      x.report_date,
-      esc(x.status),
-      new Date(x.deadline).toLocaleString(),
-    ]),
-  );
+async function loadSoundingShift() {
+  try {
+    const vesselId = n($("soundingVessel").value);
+    const shiftDate = $("soundingDate").value;
+    const shiftName = $("soundingShift").value;
+
+    if (!vesselId) {
+      throw Error("Select a vessel.");
+    }
+
+    if (!shiftDate) {
+      throw Error("Select a shift date.");
+    }
+
+    if (!shiftName) {
+      throw Error("Select a shift.");
+    }
+
+    // ---------------------------------------------------------
+    // Find the selected shift
+    // ---------------------------------------------------------
+
+    const shift = await api(
+      `/api/fuel/shift?${params({
+        vessel_id: vesselId,
+        shift_date: shiftDate,
+        shift_name: shiftName,
+      })}`,
+    );
+
+    if (!shift) {
+      throw Error("Shift not found.");
+    }
+
+    // ---------------------------------------------------------
+    // Load soundings belonging to this shift
+    // ---------------------------------------------------------
+
+    const [status, soundings] = await Promise.all([
+      api(`/api/soundings/status?shift_id=${shift.id}`),
+      api(`/api/soundings?shift_id=${shift.id}`),
+    ]);
+
+    // ---------------------------------------------------------
+    // Find vessel name
+    // ---------------------------------------------------------
+
+    const vessel = vessels.find(
+      (v) => Number(v.id) === Number(vesselId),
+    );
+
+    const vesselName =
+      vessel?.name || `Vessel ${vesselId}`;
+
+    // ---------------------------------------------------------
+    // Status summary
+    // ---------------------------------------------------------
+
+    const count = soundings.length;
+
+    let statusText = status.status || "UNKNOWN";
+
+    $("soundingStatus").innerHTML = `
+      <div class="note">
+        <strong>${esc(vesselName)}</strong>
+        · ${esc(shiftName)}
+        · ${esc(shiftDate)}
+        <br>
+        Soundings:
+        <strong>${count} / 5</strong>
+        · Status:
+        <strong>${esc(statusText)}</strong>
+      </div>
+    `;
+
+    // ---------------------------------------------------------
+    // Sounding list
+    // ---------------------------------------------------------
+
+    if (!soundings.length) {
+      $("soundingList").innerHTML =
+        '<div class="muted">No soundings submitted for this shift.</div>';
+    } else {
+      $("soundingList").innerHTML = soundings
+        .map(
+          (sounding, index) => `
+            <div class="attachment-item">
+              <div>
+                <strong>Sounding ${index + 1} of 5</strong>
+                <div class="muted">
+                  Submitted:
+                  ${esc(formatDateTime(sounding.submitted_at))}
+                </div>
+              </div>
+
+              <a
+                href="#"
+                onclick="viewShiftAttachment(${sounding.attachment_id}); return false;"
+              >
+                View
+              </a>
+            </div>
+          `,
+        )
+        .join("");
+    }
+
+    // ---------------------------------------------------------
+    // Missing / due section
+    //
+    // A shift requires at least one sounding.
+    // ---------------------------------------------------------
+
+    let missingMessage = "";
+
+    if (count === 0) {
+      missingMessage = `
+        <div class="note note-warn">
+          <strong>Sounding required.</strong>
+          This shift has no sounding yet.
+        </div>
+      `;
+    } else if (count < 5) {
+      missingMessage = `
+        <div class="muted">
+          ${5 - count} additional sounding(s) may still be uploaded.
+          Maximum is 5 per shift.
+        </div>
+      `;
+    } else {
+      missingMessage = `
+        <div class="note note-ok">
+          Maximum of 5 soundings reached for this shift.
+        </div>
+      `;
+    }
+
+    $("missingList").innerHTML = missingMessage;
+
+  } catch (e) {
+    $("soundingStatus").innerHTML =
+      `<div class="error">${esc(e.message)}</div>`;
+
+    $("soundingList").innerHTML = "";
+    $("missingList").innerHTML = "";
+  }
 }
+
 function dashQuery() {
   return params({
     from_date: $("dashFrom").value,
@@ -1146,7 +1573,8 @@ async function loadDashboard() {
       ["Received", d.total_received],
       ["Consumption", d.total_consumption],
       ["Transfer out", d.total_transfer_out],
-      ["Low fuel", d.low_fuel_count],
+      ["Advancement", d.total_advancement_m],
+      ["Dredging hours", d.total_dredging_hours],
     ]
       .map(
         ([a, v]) =>
@@ -1161,9 +1589,12 @@ async function loadDashboard() {
         "Shift",
         "Opening",
         "Received",
+        "Transfer In",
         "Engine",
-        "Out",
+        "Transfer Out",
         "Closing",
+        "Advancement",
+        "Dredging Hours",
         "Flags",
       ],
       d.rows.map((x) => [
@@ -1172,9 +1603,12 @@ async function loadDashboard() {
         esc(x.shift_name),
         f(x.opening_fuel),
         f(x.received_fuel),
+        f(x.transfer_in),
         f(x.total_engine_consumption),
         f(x.transfer_out),
         f(x.closing_fuel),
+        x.advancement_m == null ? "—" : f(x.advancement_m),
+        x.dredging_hours == null ? "—" : f(x.dredging_hours),
         esc(x.flags.join(", ")),
       ]),
     );
@@ -2415,29 +2849,78 @@ function renderMasters() {
     ]),
   );
 
+
+    // -----------------------------
+  // SITES
+  // -----------------------------
+  table(
+    "sitesList",
+    ["Project", "Site", "Code", "Status", "Actions"],
+    sites.map((x) => {
+      const project = projects.find(
+        (p) => Number(p.id) === Number(x.project_id),
+      );
+
+      return [
+        project
+          ? `${esc(project.name)} (${esc(project.code)})`
+          : `Project ${x.project_id}`,
+        esc(x.name),
+        esc(x.site_code),
+        `<button
+          class="btn btn-sm ${x.is_active ? "btn-success" : "btn-danger"}"
+          onclick="toggleSiteActive(${x.id}, ${x.is_active})">
+          ${x.is_active ? "Active" : "Inactive"}
+        </button>`,
+        `<button
+          class="btn btn-sm btn-warn"
+          onclick="editSite(${x.id})">
+          Edit
+        </button>`,
+      ];
+    }),
+  );
+
+
   // -----------------------------
   // VESSELS
   // -----------------------------
   table(
     "vesselsList",
-    ["ID", "Project", "Vessel", "Code", "Threshold", "Status", "Actions"],
-    vessels.map((x) => [
-      x.id,
-      x.project_id,
-      esc(x.name),
-      esc(x.code),
-      f(x.fuel_threshold_litres),
-      `<button
-        class="btn btn-sm ${x.is_active ? "btn-success" : "btn-danger"}"
-        onclick="toggleVesselActive(${x.id}, ${x.is_active})">
-        ${x.is_active ? "Active" : "Inactive"}
-      </button>`,
-      `<button
-        class="btn btn-sm btn-warn"
-        onclick="editVessel(${x.id})">
-        Edit
-      </button>`,
-    ]),
+    ["ID", "Project", "Site", "Vessel", "Code", "Type", "Threshold", "Status", "Actions"],
+    vessels.map((x) => {
+      const project = projects.find(
+        (p) => Number(p.id) === Number(x.project_id),
+      );
+
+      const site = sites.find(
+        (s) => Number(s.id) === Number(x.site_id),
+      );
+
+      return [
+        x.id,
+        project
+          ? `${esc(project.name)} (${esc(project.code)})`
+          : `Project ${x.project_id}`,
+        site
+          ? `${esc(site.name)} (${esc(site.site_code)})`
+          : "No site assigned",
+        esc(x.name),
+        esc(x.code),
+        esc(x.vessel_type),
+        f(x.fuel_threshold_litres),
+        `<button
+          class="btn btn-sm ${x.is_active ? "btn-success" : "btn-danger"}"
+          onclick="toggleVesselActive(${x.id}, ${x.is_active})">
+          ${x.is_active ? "Active" : "Inactive"}
+        </button>`,
+        `<button
+          class="btn btn-sm btn-warn"
+          onclick="editVessel(${x.id})">
+          Edit
+        </button>`,
+      ];
+    }),
   );
 
   // -----------------------------
@@ -2744,9 +3227,350 @@ async function toggleProjectActive(id, currentlyActive) {
 }
 
 
+
+// ============================================================
+// SITES
+// ============================================================
+
+function addSite() {
+  const tableEl = document.querySelector("#sitesList table");
+  if (!tableEl) return;
+
+  const tbody = tableEl.querySelector("tbody");
+  if (!tbody) return;
+
+  // Prevent multiple add rows
+  if (tbody.querySelector(".new-site-row")) return;
+
+  const projectOptions = projects
+    .filter((p) => p.is_active !== false)
+    .map(
+      (p) => `
+        <option value="${p.id}">
+          ${esc(p.name)} (${esc(p.code)})
+        </option>
+      `,
+    )
+    .join("");
+
+  const row = document.createElement("tr");
+  row.className = "new-site-row";
+
+  row.innerHTML = `
+    <td>
+      <select
+        class="master-inline-input"
+        id="newSiteProject">
+        <option value="">Select Project</option>
+        ${projectOptions}
+      </select>
+    </td>
+
+    <td>
+      <input
+        type="text"
+        class="master-inline-input"
+        id="newSiteName"
+        placeholder="Site name"
+      />
+    </td>
+
+    <td>
+      <input
+        type="text"
+        class="master-inline-input"
+        id="newSiteCode"
+        placeholder="Site code"
+      />
+    </td>
+
+    <td>
+      <span class="muted">Active</span>
+    </td>
+
+    <td>
+      <button
+        class="btn btn-sm btn-success"
+        onclick="saveNewSite()">
+        Save
+      </button>
+
+      <button
+        class="btn btn-sm"
+        onclick="renderMasters()">
+        Cancel
+      </button>
+    </td>
+  `;
+
+  tbody.prepend(row);
+
+  document.querySelector("#newSiteProject")?.focus();
+}
+
+
+async function saveNewSite() {
+  try {
+    const projectId = Number(
+      document.querySelector("#newSiteProject")?.value,
+    );
+
+    const name =
+      document.querySelector("#newSiteName")?.value.trim();
+
+    const siteCode =
+      document.querySelector("#newSiteCode")?.value.trim();
+
+    if (!Number.isInteger(projectId) || projectId <= 0) {
+      throw Error("Please select a project.");
+    }
+
+    if (!name) {
+      throw Error("Site name is required.");
+    }
+
+    if (!siteCode) {
+      throw Error("Site code is required.");
+    }
+
+    await api("/api/sites", {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: projectId,
+        name,
+        site_code: siteCode,
+        is_active: true,
+      }),
+    });
+
+    message("Site created successfully.", "success");
+
+    await loadMaster();
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+
+async function editSite(id) {
+  const site = sites.find(
+    (x) => Number(x.id) === Number(id),
+  );
+
+  if (!site) {
+    message("Site not found.", "error");
+    return;
+  }
+
+  const tableEl = document.querySelector("#sitesList table");
+  if (!tableEl) return;
+
+  const rows = Array.from(
+    tableEl.querySelectorAll("tbody tr"),
+  );
+
+  const row = rows.find((r) => {
+    const editButton = r.querySelector(
+      `button[onclick="editSite(${id})"]`,
+    );
+
+    return !!editButton;
+  });
+
+  if (!row) return;
+
+  const projectOptions = projects
+    .filter((p) => p.is_active !== false || Number(p.id) === Number(site.project_id))
+    .map(
+      (p) => `
+        <option
+          value="${p.id}"
+          ${Number(p.id) === Number(site.project_id) ? "selected" : ""}>
+          ${esc(p.name)} (${esc(p.code)})
+        </option>
+      `,
+    )
+    .join("");
+
+  row.innerHTML = `
+    <td>
+      <select
+        class="master-inline-input"
+        id="editSiteProject_${id}">
+        ${projectOptions}
+      </select>
+    </td>
+
+    <td>
+      <input
+        type="text"
+        class="master-inline-input"
+        id="editSiteName_${id}"
+        value="${esc(site.name || "")}"
+      />
+    </td>
+
+    <td>
+      <input
+        type="text"
+        class="master-inline-input"
+        id="editSiteCode_${id}"
+        value="${esc(site.site_code || "")}"
+      />
+    </td>
+
+    <td>
+      <select
+        class="master-inline-input"
+        id="editSiteStatus_${id}">
+        <option
+          value="true"
+          ${site.is_active ? "selected" : ""}>
+          Active
+        </option>
+
+        <option
+          value="false"
+          ${!site.is_active ? "selected" : ""}>
+          Inactive
+        </option>
+      </select>
+    </td>
+
+    <td>
+      <button
+        class="btn btn-sm btn-success"
+        onclick="saveSite(${id})">
+        Save
+      </button>
+
+      <button
+        class="btn btn-sm"
+        onclick="renderMasters()">
+        Cancel
+      </button>
+    </td>
+  `;
+
+  document
+    .querySelector(`#editSiteName_${id}`)
+    ?.focus();
+}
+
+
+async function saveSite(id) {
+  try {
+    const projectId = Number(
+      document.querySelector(`#editSiteProject_${id}`)?.value,
+    );
+
+    const name = document
+      .querySelector(`#editSiteName_${id}`)
+      ?.value.trim();
+
+    const siteCode = document
+      .querySelector(`#editSiteCode_${id}`)
+      ?.value.trim();
+
+    const isActive =
+      document.querySelector(`#editSiteStatus_${id}`)?.value ===
+      "true";
+
+    if (!Number.isInteger(projectId) || projectId <= 0) {
+      throw Error("Please select a project.");
+    }
+
+    if (!name) {
+      throw Error("Site name is required.");
+    }
+
+    if (!siteCode) {
+      throw Error("Site code is required.");
+    }
+
+    const confirmed = confirm(
+      `Save changes to site "${name}"?`,
+    );
+
+    if (!confirmed) return;
+
+    await api(`/api/sites/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        project_id: projectId,
+        name,
+        site_code: siteCode,
+        is_active: isActive,
+      }),
+    });
+
+    message("Site updated successfully.", "success");
+
+    await loadMaster();
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+
+async function toggleSiteActive(id, currentlyActive) {
+  const site = sites.find(
+    (x) => Number(x.id) === Number(id),
+  );
+
+  if (!site) {
+    message("Site not found.", "error");
+    return;
+  }
+
+  const newStatus = !currentlyActive;
+
+  const confirmed = confirm(
+    `${newStatus ? "Activate" : "Deactivate"} site "${site.name}"?`,
+  );
+
+  if (!confirmed) return;
+
+  try {
+    await api(`/api/sites/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        project_id: site.project_id,
+        name: site.name,
+        site_code: site.site_code,
+        is_active: newStatus,
+      }),
+    });
+
+    message(
+      `Site "${site.name}" is now ${
+        newStatus ? "Active" : "Inactive"
+      }.`,
+      "success",
+    );
+
+    await loadMaster();
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+
 // ============================================================
 // VESSELS
 // ============================================================
+const VESSEL_TYPES = [
+  "Dredger",
+  "Tug Boat",
+  "Survey Boat",
+  "House Boat",
+  "Wooden Boat",
+  "Steel Boat",
+  "Fiber Boat",
+  "Dredge Pump Boat",
+  "Tanker",
+];
+
 
 function addVessel() {
   const tableEl = document.querySelector("#vesselsList table");
@@ -2762,8 +3586,15 @@ function addVessel() {
     .map(
       (p) =>
         `<option value="${p.id}">
-          ${esc(p.name)}
+          ${esc(p.name)} (${esc(p.code)})
         </option>`,
+    )
+    .join("");
+
+  const typeOptions = VESSEL_TYPES
+    .map(
+      (type) =>
+        `<option value="${esc(type)}">${esc(type)}</option>`,
     )
     .join("");
 
@@ -2774,9 +3605,17 @@ function addVessel() {
     <td>New</td>
 
     <td>
-      <select id="newVesselProject">
+      <select
+        id="newVesselProject"
+        onchange="populateNewVesselSites()">
         <option value="">Select Project</option>
         ${projectOptions}
+      </select>
+    </td>
+
+    <td>
+      <select id="newVesselSite">
+        <option value="">Select Project First</option>
       </select>
     </td>
 
@@ -2792,8 +3631,15 @@ function addVessel() {
       <input
         type="text"
         id="newVesselCode"
-        placeholder="Code"
+        placeholder="Required code"
       />
+    </td>
+
+    <td>
+      <select id="newVesselType">
+        <option value="">Select Type</option>
+        ${typeOptions}
+      </select>
     </td>
 
     <td>
@@ -2833,11 +3679,51 @@ function addVessel() {
   document.querySelector("#newVesselName")?.focus();
 }
 
+function populateNewVesselSites() {
+  const projectId = Number(
+    document.querySelector("#newVesselProject")?.value,
+  );
+
+  const siteSelect = document.querySelector("#newVesselSite");
+
+  if (!siteSelect) return;
+
+  if (!projectId) {
+    siteSelect.innerHTML =
+      `<option value="">Select Project First</option>`;
+    return;
+  }
+
+  const projectSites = sites
+    .filter(
+      (s) =>
+        Number(s.project_id) === projectId &&
+        s.is_active !== false,
+    )
+    .sort((a, b) =>
+      String(a.name).localeCompare(String(b.name)),
+    );
+
+  siteSelect.innerHTML =
+    `<option value="">Select Site</option>` +
+    projectSites
+      .map(
+        (s) =>
+          `<option value="${s.id}">
+            ${esc(s.name)} (${esc(s.site_code)})
+          </option>`,
+      )
+      .join("");
+}
 
 async function saveNewVessel() {
   try {
     const projectId = Number(
       document.querySelector("#newVesselProject")?.value,
+    );
+
+    const siteId = Number(
+      document.querySelector("#newVesselSite")?.value,
     );
 
     const name = document
@@ -2847,6 +3733,10 @@ async function saveNewVessel() {
     const code = document
       .querySelector("#newVesselCode")
       ?.value.trim();
+
+    const vesselType = document
+      .querySelector("#newVesselType")
+      ?.value;
 
     const threshold = Number(
       document.querySelector("#newVesselThreshold")?.value,
@@ -2859,12 +3749,20 @@ async function saveNewVessel() {
       throw Error("Please select a project.");
     }
 
+    if (!Number.isInteger(siteId) || siteId <= 0) {
+      throw Error("Please select a site.");
+    }
+
     if (!name) {
       throw Error("Vessel name is required.");
     }
 
     if (!code) {
       throw Error("Vessel code is required.");
+    }
+
+    if (!vesselType) {
+      throw Error("Please select a vessel type.");
     }
 
     if (!Number.isFinite(threshold) || threshold < 0) {
@@ -2875,8 +3773,10 @@ async function saveNewVessel() {
       method: "POST",
       body: JSON.stringify({
         project_id: projectId,
+        site_id: siteId,
         name,
         code,
+        vessel_type: vesselType,
         is_active: isActive,
         fuel_threshold_litres: threshold,
       }),
@@ -2920,7 +3820,34 @@ async function editVessel(id) {
         `<option
           value="${p.id}"
           ${Number(p.id) === Number(vessel.project_id) ? "selected" : ""}>
-          ${esc(p.name)}
+          ${esc(p.name)} (${esc(p.code)})
+        </option>`,
+    )
+    .join("");
+
+  const siteOptions = sites
+    .filter(
+      (s) =>
+        Number(s.project_id) === Number(vessel.project_id) &&
+        s.is_active !== false,
+    )
+    .map(
+      (s) =>
+        `<option
+          value="${s.id}"
+          ${Number(s.id) === Number(vessel.site_id) ? "selected" : ""}>
+          ${esc(s.name)} (${esc(s.site_code)})
+        </option>`,
+    )
+    .join("");
+
+  const typeOptions = VESSEL_TYPES
+    .map(
+      (type) =>
+        `<option
+          value="${esc(type)}"
+          ${type === vessel.vessel_type ? "selected" : ""}>
+          ${esc(type)}
         </option>`,
     )
     .join("");
@@ -2931,8 +3858,18 @@ async function editVessel(id) {
     <td>
       <select
         class="master-inline-input"
-        id="editVesselProject_${id}">
+        id="editVesselProject_${id}"
+        onchange="populateEditVesselSites(${id})">
         ${projectOptions}
+      </select>
+    </td>
+
+    <td>
+      <select
+        class="master-inline-input"
+        id="editVesselSite_${id}">
+        <option value="">Select Site</option>
+        ${siteOptions}
       </select>
     </td>
 
@@ -2952,6 +3889,15 @@ async function editVessel(id) {
         id="editVesselCode_${id}"
         value="${esc(vessel.code || "")}"
       />
+    </td>
+
+    <td>
+      <select
+        class="master-inline-input"
+        id="editVesselType_${id}">
+        <option value="">Select Type</option>
+        ${typeOptions}
+      </select>
     </td>
 
     <td>
@@ -2997,12 +3943,54 @@ async function editVessel(id) {
     .querySelector(`#editVesselName_${id}`)
     ?.focus();
 }
+function populateEditVesselSites(id) {
+  const projectId = Number(
+    document.querySelector(`#editVesselProject_${id}`)?.value,
+  );
+
+  const siteSelect = document.querySelector(
+    `#editVesselSite_${id}`,
+  );
+
+  if (!siteSelect) return;
+
+  if (!projectId) {
+    siteSelect.innerHTML =
+      `<option value="">Select Site</option>`;
+    return;
+  }
+
+  const projectSites = sites
+    .filter(
+      (s) =>
+        Number(s.project_id) === projectId &&
+        s.is_active !== false,
+    )
+    .sort((a, b) =>
+      String(a.name).localeCompare(String(b.name)),
+    );
+
+  siteSelect.innerHTML =
+    `<option value="">Select Site</option>` +
+    projectSites
+      .map(
+        (s) =>
+          `<option value="${s.id}">
+            ${esc(s.name)} (${esc(s.site_code)})
+          </option>`,
+      )
+      .join("");
+}
 
 
 async function saveVessel(id) {
   try {
     const projectId = Number(
       document.querySelector(`#editVesselProject_${id}`)?.value,
+    );
+
+    const siteId = Number(
+      document.querySelector(`#editVesselSite_${id}`)?.value,
     );
 
     const name = document
@@ -3012,6 +4000,10 @@ async function saveVessel(id) {
     const code = document
       .querySelector(`#editVesselCode_${id}`)
       ?.value.trim();
+
+    const vesselType = document
+      .querySelector(`#editVesselType_${id}`)
+      ?.value;
 
     const threshold = Number(
       document.querySelector(`#editVesselThreshold_${id}`)?.value,
@@ -3026,12 +4018,20 @@ async function saveVessel(id) {
       throw Error("Please select a project.");
     }
 
+    if (!Number.isInteger(siteId) || siteId <= 0) {
+      throw Error("Please select a site.");
+    }
+
     if (!name) {
       throw Error("Vessel name is required.");
     }
 
     if (!code) {
       throw Error("Vessel code is required.");
+    }
+
+    if (!vesselType) {
+      throw Error("Please select a vessel type.");
     }
 
     if (!Number.isFinite(threshold) || threshold < 0) {
@@ -3048,8 +4048,10 @@ async function saveVessel(id) {
       method: "PATCH",
       body: JSON.stringify({
         project_id: projectId,
+        site_id: siteId,
         name,
         code,
+        vessel_type: vesselType,
         is_active: isActive,
         fuel_threshold_litres: threshold,
       }),
@@ -3083,17 +4085,19 @@ async function toggleVesselActive(id, currentlyActive) {
   if (!confirmed) return;
 
   try {
-    await api(`/api/vessels/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        project_id: vessel.project_id,
-        name: vessel.name,
-        code: vessel.code,
-        is_active: newStatus,
-        fuel_threshold_litres:
-          Number(vessel.fuel_threshold_litres || 0),
-      }),
-    });
+        await api(`/api/vessels/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            project_id: vessel.project_id,
+            site_id: vessel.site_id,
+            name: vessel.name,
+            code: vessel.code,
+            vessel_type: vessel.vessel_type,
+            is_active: newStatus,
+            fuel_threshold_litres:
+              Number(vessel.fuel_threshold_litres || 0),
+          }),
+        });
 
     message(
       `Vessel "${vessel.name}" is now ${
@@ -4541,7 +5545,7 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
     try {
       if (b.dataset.page === "transfers") await loadTransfers();
       if (b.dataset.page === "production") await loadProduction();
-      if (b.dataset.page === "soundings") await loadSoundings();
+      if (b.dataset.page === "soundings") await loadSoundingShift();
       if (b.dataset.page === "dashboard") await loadDashboard();
       if (b.dataset.page === "charts") await loadCharts();
       if (b.dataset.page === "users" && me.role === "ADMIN") await loadUsers();
@@ -4552,6 +5556,9 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
   }),
 );
 $("shiftVessel").addEventListener("change", refreshShiftEquipment);
+$("soundingVessel").addEventListener("change", loadSoundingShift);
+$("soundingDate").addEventListener("change", loadSoundingShift);
+$("soundingShift").addEventListener("change", loadSoundingShift);
 $("productionProject").addEventListener("change", () =>
   select(
     "productionVessel",

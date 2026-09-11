@@ -12,6 +12,8 @@ from backend.models.sounding import Sounding
 from backend.models.attachment import Attachment
 from backend.models.production import ProductionRecord
 from backend.models.shift_attachments import ShiftAttachment
+from backend.models.site import Site
+from backend.models.transfer_attachment import TransferAttachment
 
 __all__ = [
     "User",
@@ -29,4 +31,7 @@ __all__ = [
     "Sounding",
     "Attachment",
     "ProductionRecord",
+    "ShiftAttachment",
+    "Site",
+    "TransferAttachment",
 ]

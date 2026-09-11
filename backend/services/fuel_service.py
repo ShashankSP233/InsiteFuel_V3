@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.fuel import (
@@ -11,9 +11,11 @@ from backend.models.fuel import (
 )
 from backend.models.shift import Shift
 from backend.models.vessel import Vessel
+from backend.models.transfer import FuelTransfer, TransferStatus
+from backend.models.transfer_attachment import TransferAttachment
 from backend.services.audit_service import AuditService
 from backend.utils.time import now_ist
-
+from backend.models.sounding import Sounding
 
 
 class FuelService:
@@ -141,6 +143,7 @@ class FuelService:
             },
             details="Shift created automatically as part of fuel ledger activity.",
         )
+
         return shift
 
     @staticmethod
@@ -203,7 +206,7 @@ class FuelService:
 
         db.add(shift)
         db.flush()
-        
+
         AuditService.log(
             db=db,
             user_id=created_by_user_id,
@@ -214,18 +217,24 @@ class FuelService:
             new_values={
                 "vessel_id": shift.vessel_id,
                 "shift_date": shift.shift_date.isoformat(),
-                "shift_name": shift.shift_name.value
-                if hasattr(shift.shift_name, "value")
-                else shift.shift_name,
+                "shift_name": (
+                    shift.shift_name.value
+                    if hasattr(shift.shift_name, "value")
+                    else shift.shift_name
+                ),
                 "opening_fuel": str(shift.opening_fuel),
                 "status": shift.status,
             },
             details="Initial opening fuel established for the vessel.",
         )
+
         return shift
 
     @staticmethod
-    def calculate_shift_balance(db: Session, shift_id: int) -> dict[str, Decimal]:
+    def calculate_shift_balance(
+        db: Session,
+        shift_id: int,
+    ) -> dict[str, Decimal]:
         shift = db.get(Shift, shift_id)
 
         if shift is None:
@@ -301,7 +310,10 @@ class FuelService:
         }
 
     @staticmethod
-    def recalculate_shift(db: Session, shift_id: int) -> Shift:
+    def recalculate_shift(
+        db: Session,
+        shift_id: int,
+    ) -> Shift:
         shift = db.get(Shift, shift_id)
 
         if shift is None:
@@ -318,6 +330,7 @@ class FuelService:
 
         return shift
 
+    @staticmethod
     def add_transaction(
         db: Session,
         vessel_id: int,
@@ -342,7 +355,9 @@ class FuelService:
         """
 
         if quantity <= 0:
-            raise ValueError("Transaction quantity must be greater than zero.")
+            raise ValueError(
+                "Transaction quantity must be greater than zero."
+            )
 
         if transaction_type == FuelTransactionType.ADJUSTMENT:
             if adjustment_direction is None:
@@ -354,6 +369,7 @@ class FuelService:
                 raise ValueError(
                     "Adjustment direction is only allowed for ADJUSTMENT transactions."
                 )
+
         # Fuel source information is only valid for fuel receipts.
         if transaction_type == FuelTransactionType.RECEIPT:
             if fuel_source is not None:
@@ -374,11 +390,13 @@ class FuelService:
 
                 if not source_vessel.is_active:
                     raise ValueError("Source vessel is not active.")
+
         else:
             if source_vessel_id is not None or fuel_source is not None:
                 raise ValueError(
                     "Fuel source information is only allowed for RECEIPT transactions."
                 )
+
         shift = FuelService.get_or_create_shift(
             db=db,
             vessel_id=vessel_id,
@@ -406,14 +424,17 @@ class FuelService:
             reference_id=reference_id,
             remarks=remarks,
             source_vessel_id=source_vessel_id,
-            fuel_source=fuel_source,    
+            fuel_source=fuel_source,
             created_by_user_id=created_by_user_id,
         )
 
         db.add(transaction)
         db.flush()
 
-        FuelService.recalculate_shift(db, shift.id)
+        FuelService.recalculate_shift(
+            db,
+            shift.id,
+        )
 
         AuditService.log(
             db=db,
@@ -559,7 +580,73 @@ class FuelService:
             adjustment_direction=direction,
             remarks=remarks,
         )
-    
+
+    @staticmethod
+    def update_shift_production_data(
+        db: Session,
+        shift_id: int,
+        advancement_m: Decimal | None,
+        dredging_hours: Decimal | None,
+        updated_by_user_id: int | None = None,
+    ) -> Shift:
+        shift = db.get(Shift, shift_id)
+
+        if shift is None:
+            raise ValueError("Shift not found.")
+
+        if shift.status != "OPEN":
+            raise ValueError(
+                "Production data can only be updated for an OPEN shift."
+            )
+
+        if advancement_m is not None and advancement_m < 0:
+            raise ValueError("Advancement cannot be negative.")
+
+        if dredging_hours is not None and dredging_hours < 0:
+            raise ValueError("Dredging hours cannot be negative.")
+
+        old_values = {
+            "advancement_m": (
+                str(shift.advancement_m)
+                if shift.advancement_m is not None
+                else None
+            ),
+            "dredging_hours": (
+                str(shift.dredging_hours)
+                if shift.dredging_hours is not None
+                else None
+            ),
+        }
+
+        shift.advancement_m = advancement_m
+        shift.dredging_hours = dredging_hours
+
+        db.flush()
+
+        AuditService.log(
+            db=db,
+            user_id=updated_by_user_id,
+            action="UPDATE_SHIFT_PRODUCTION_DATA",
+            entity="shifts",
+            entity_id=shift.id,
+            old_values=old_values,
+            new_values={
+                "advancement_m": (
+                    str(shift.advancement_m)
+                    if shift.advancement_m is not None
+                    else None
+                ),
+                "dredging_hours": (
+                    str(shift.dredging_hours)
+                    if shift.dredging_hours is not None
+                    else None
+                ),
+            },
+            details="Shift operator production data updated.",
+        )
+
+        return shift
+
     @staticmethod
     def close_shift(
         db: Session,
@@ -579,6 +666,31 @@ class FuelService:
                 f"Shift cannot be closed from status '{shift.status}'."
             )
 
+        vessel = db.get(Vessel, shift.vessel_id)
+        if vessel is not None and vessel.vessel_type == "Dredger":
+            if shift.advancement_m is None:
+                raise ValueError(
+                    "Shift cannot be closed: advancement is required for Dredgers."
+                )
+            if shift.dredging_hours is None:
+                raise ValueError(
+                    "Shift cannot be closed: dredging hours are required for Dredgers."
+                )
+
+        # ---------------------------------------------------------
+        # Phase 4: every shift requires at least one sounding.
+        # ---------------------------------------------------------
+
+        sounding_count = db.scalar(
+            select(func.count(Sounding.id))
+            .where(Sounding.shift_id == shift.id)
+        ) or 0
+
+        if sounding_count < 1:
+            raise ValueError(
+                "Shift cannot be closed without at least one sounding."
+            )
+
         # Calculate the final balance from the ledger.
         FuelService.recalculate_shift(
             db,
@@ -595,10 +707,51 @@ class FuelService:
                 "Shift cannot be closed with negative closing fuel."
             )
 
+        # ---------------------------------------------------------
+        # Completed transfers require at least one transfer note.
+        #
+        # Transfer notes are NOT required for:
+        #   INITIATED
+        #   RECEIVING_CONFIRMED
+        #   MANAGER_REVIEW
+        #   APPROVED
+        #
+        # They are required only when a completed transfer
+        # (BALANCES_UPDATED) is associated with this shift.
+        # ---------------------------------------------------------
+
+        completed_transfers = db.scalars(
+            select(FuelTransfer).where(
+                FuelTransfer.status == TransferStatus.BALANCES_UPDATED,
+                or_(
+                    FuelTransfer.from_shift_id == shift_id,
+                    FuelTransfer.to_shift_id == shift_id,
+                ),
+            )
+        ).all()
+
+        for transfer in completed_transfers:
+            transfer_note_count = db.scalar(
+                select(func.count(TransferAttachment.id)).where(
+                    TransferAttachment.transfer_id == transfer.id
+                )
+            ) or 0
+
+            if transfer_note_count < 1:
+                raise ValueError(
+                    f"Shift cannot be closed because completed "
+                    f"Transfer #{transfer.id} has no transfer note."
+                )
+
+        # ---------------------------------------------------------
+        # Close the shift
+        # ---------------------------------------------------------
+
         shift.status = "CLOSED"
         shift.closed_at = now_ist()
 
         db.flush()
+
         AuditService.log(
             db=db,
             user_id=closed_by_user_id,
@@ -623,6 +776,7 @@ class FuelService:
             },
             details="Shift closed and final fuel balance calculated.",
         )
+
         return shift
 
     @staticmethod
@@ -641,7 +795,7 @@ class FuelService:
                 Shift.shift_name == shift_name,
             )
         )
-        
+
     @staticmethod
     def correct_opening_fuel(
         db: Session,
@@ -656,12 +810,11 @@ class FuelService:
             raise ValueError("Shift not found.")
 
         if new_opening_fuel < 0:
-            raise ValueError(
-                "Opening fuel cannot be negative."
-            )
+            raise ValueError("Opening fuel cannot be negative.")
 
         old_opening_fuel = Decimal(str(shift.opening_fuel))
         new_opening_fuel = Decimal(str(new_opening_fuel))
+
         if not reason or not reason.strip():
             raise ValueError("Correction reason is required.")
 
@@ -714,7 +867,7 @@ class FuelService:
             )
 
             previous_shift = next_shift
-            
+
         AuditService.log(
             db=db,
             user_id=corrected_by_user_id,
@@ -734,6 +887,7 @@ class FuelService:
                 f"Subsequent shift openings and closings were recalculated."
             ),
         )
+
         return shift
 
     @staticmethod
@@ -749,9 +903,11 @@ class FuelService:
         return db.scalars(
             select(FuelTransaction)
             .where(FuelTransaction.shift_id == shift_id)
-            .order_by(FuelTransaction.transaction_date, FuelTransaction.id)
+            .order_by(
+                FuelTransaction.transaction_date,
+                FuelTransaction.id,
+            )
         ).all()
-
 
     @staticmethod
     def correct_adjustment(
@@ -887,7 +1043,7 @@ class FuelService:
                 "adjustment_direction": current.adjustment_direction,
             },
             new_values={
-                "transaction_id": corrected.id,
+                "transaction_id": current.id,
                 "quantity": str(new_quantity),
                 "adjustment_direction": new_direction.value,
             },

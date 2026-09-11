@@ -34,10 +34,14 @@ router = APIRouter(
 )
 def list_vessels(
     db: Session = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
     return db.scalars(
-        select(Vessel).order_by(Vessel.id)
+        select(Vessel).order_by(
+            Vessel.id
+        )
     ).all()
 
 
@@ -48,7 +52,9 @@ def list_vessels(
 def get_vessel(
     vessel_id: int,
     db: Session = Depends(db_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
     vessel = get_vessel_by_id(
         db,
@@ -80,10 +86,15 @@ def create_new_vessel(
         vessel = create_vessel(
             db=db,
             project_id=payload.project_id,
+            site_id=payload.site_id,
             name=payload.name,
             code=payload.code,
-            fuel_threshold_litres=payload.fuel_threshold_litres,
-            created_by_user_id=current_user.id
+            vessel_type=payload.vessel_type,
+            is_active=payload.is_active,
+            fuel_threshold_litres=(
+                payload.fuel_threshold_litres
+            ),
+            created_by_user_id=current_user.id,
         )
 
         db.commit()
@@ -128,11 +139,15 @@ def update_existing_vessel(
             db,
             vessel,
             project_id=payload.project_id,
+            site_id=payload.site_id,
             name=payload.name,
             code=payload.code,
+            vessel_type=payload.vessel_type,
             is_active=payload.is_active,
-            fuel_threshold_litres=payload.fuel_threshold_litres,
-            updated_by_user_id=current_user.id
+            fuel_threshold_litres=(
+                payload.fuel_threshold_litres
+            ),
+            updated_by_user_id=current_user.id,
         )
 
         db.commit()
@@ -147,6 +162,7 @@ def update_existing_vessel(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+
 
 @router.put(
     "/{vessel_id}/threshold",

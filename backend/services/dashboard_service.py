@@ -175,6 +175,16 @@ class DashboardService:
                     ),
 
                     "closing_fuel": closing_fuel,
+                    "advancement_m": (
+                        Decimal(str(shift.advancement_m))
+                        if shift.advancement_m is not None
+                        else None
+                    ),
+                    "dredging_hours": (
+                        Decimal(str(shift.dredging_hours))
+                        if shift.dredging_hours is not None
+                        else None
+                    ),
 
                     "fuel_threshold_litres": threshold,
 

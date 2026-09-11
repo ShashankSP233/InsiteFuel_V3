@@ -85,6 +85,26 @@ def get_fuel_dashboard(
         Decimal("0"),
     )
 
+    total_advancement_m = sum(
+        (
+            Decimal(str(row["advancement_m"]))
+            if row["advancement_m"] is not None
+            else Decimal("0")
+            for row in rows
+        ),
+        Decimal("0"),
+    )
+
+    total_dredging_hours = sum(
+        (
+            Decimal(str(row["dredging_hours"]))
+            if row["dredging_hours"] is not None
+            else Decimal("0")
+            for row in rows
+        ),
+        Decimal("0"),
+    )
+
     negative_balance_count = sum(
         1 for row in rows
         if "NEGATIVE_BALANCE" in row["flags"]
@@ -120,6 +140,8 @@ def get_fuel_dashboard(
         total_received=total_received,
         total_consumption=total_consumption,
         total_transfer_out=total_transfer_out,
+        total_advancement_m=total_advancement_m,
+        total_dredging_hours=total_dredging_hours,
         record_count=len(paginated_rows),
         submitted_count=submitted_count,
         negative_balance_count=negative_balance_count,

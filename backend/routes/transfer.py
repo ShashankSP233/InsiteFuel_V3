@@ -15,6 +15,15 @@ from backend.schemas.transfer import (
     TransferReceive,
     TransferSubmitReview,
 )
+
+from backend.schemas.transfer_attachment import (
+    TransferAttachmentCreate,
+    TransferAttachmentResponse,
+)
+from backend.services.transfer_attachment_service import (
+    TransferAttachmentService,
+)
+
 from backend.services.transfer_service import TransferService
 
 
@@ -219,6 +228,61 @@ def list_transfers(
 
     return db.scalars(statement).all()
 
+@router.post(
+    "/{transfer_id}/attachments",
+    response_model=TransferAttachmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_transfer_attachment(
+    transfer_id: int,
+    data: TransferAttachmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        transfer_attachment = (
+            TransferAttachmentService.add_attachment(
+                db=db,
+                transfer_id=transfer_id,
+                attachment_id=data.attachment_id,
+                created_by_user_id=current_user.id,
+            )
+        )
+
+        db.commit()
+        db.refresh(transfer_attachment)
+
+        return transfer_attachment
+
+    except ValueError as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+
+@router.get(
+    "/{transfer_id}/attachments",
+    response_model=list[TransferAttachmentResponse],
+)
+def list_transfer_attachments(
+    transfer_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return TransferAttachmentService.list_attachments(
+            db=db,
+            transfer_id=transfer_id,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
 
 @router.get(
     "/{transfer_id}",

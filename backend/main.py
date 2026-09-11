@@ -24,7 +24,7 @@ from backend.database import SessionLocal
 from backend.services.bootstrap_service  import BootstrapService
 from backend.config import settings
 from backend.routes.shift_attachments import router as shift_attachments_router
-
+from backend.routes.site import router as site_router
 
 app = FastAPI(
     title="InsiteFuel V3",
@@ -59,6 +59,8 @@ app.include_router(auth_router)
 app.include_router(users_router)
 
 app.include_router(projects_router)
+
+app.include_router(site_router)
 
 app.include_router(vessels_router)
 
