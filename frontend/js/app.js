@@ -129,11 +129,21 @@ async function logout() {
     showLogin();
   }
 }
+
+function updateOpeningFuelPermission() {
+  const openingFuel = $("openingFuel");
+
+  if (!openingFuel) return;
+
+  openingFuel.readOnly = true;
+}
+
 async function init() {
   me = await api("/api/auth/me");
   $("loginWrap").classList.add("hidden");
   $("appWrap").classList.remove("hidden");
   $("userChip").textContent = `${me.full_name || me.username} · ${me.role}`;
+  updateOpeningFuelPermission();
   document
     .querySelectorAll(".management-only")
     .forEach(
@@ -185,6 +195,8 @@ function clearShiftProductionFields() {
 }
 
 function populateShiftProductionFields() {
+  updateOpeningFuelPermission();
+
   if (!activeShift) {
     clearShiftProductionFields();
     return;
@@ -428,6 +440,7 @@ async function openShift() {
     activeShift = s;
     $("openingFuel").value = s.opening_fuel;
     populateShiftProductionFields();
+    updateOpeningFuelPermission();
     $("shiftState").textContent =
       `Shift #${s.id} · ${s.status} · opening ${f(s.opening_fuel)} L`;
 
@@ -439,19 +452,30 @@ async function openShift() {
 }
 async function establishInitialOpening() {
   try {
-    if (me.role === "OPERATOR")
-      throw Error(
-        "Only a manager or administrator may establish an initial opening.",
-      );
+    const rawOpeningFuel = prompt(
+      "Initial opening fuel (L):",
+      $("openingFuel").value || "0",
+    );
+
+    if (rawOpeningFuel === null) return;
+
+    const openingFuel = Number(rawOpeningFuel);
+
+    if (!Number.isFinite(openingFuel) || openingFuel < 0) {
+      throw Error("Opening fuel must be a non-negative number.");
+    }
+
     const s = await api("/api/fuel/shift/initial-opening", {
       method: "POST",
       body: JSON.stringify({
         vessel_id: n($("shiftVessel").value),
         shift_date: $("shiftDate").value,
-        opening_fuel: n($("openingFuel").value),
+        opening_fuel: openingFuel,
       }),
     });
     activeShift = s;
+    $("openingFuel").value = s.opening_fuel;
+    updateOpeningFuelPermission();
     message(`Initial opening created for shift #${s.id}.`, "success");
 
     await loadShiftReport();
@@ -555,6 +579,60 @@ async function loadShiftReport() {
     message(e.message, "error");
   }
 }
+async function changeOpeningFuel() {
+  try {
+    if (!activeShift) {
+      throw Error("Open or load a shift first.");
+    }
+
+    if (activeShift.status !== "OPEN") {
+      throw Error("Only an OPEN shift can be updated.");
+    }
+
+    const role = String(me?.role || "").trim().toUpperCase();
+
+    if (!["MANAGER", "ADMIN"].includes(role)) {
+      throw Error("Only a manager or administrator may edit opening fuel.");
+    }
+
+    const rawOpeningFuel = prompt(
+      "New opening fuel (L):",
+      String(activeShift.opening_fuel),
+    );
+
+    if (rawOpeningFuel === null) return;
+
+    const openingFuel = Number(rawOpeningFuel);
+
+    if (!Number.isFinite(openingFuel) || openingFuel < 0) {
+      throw Error("Opening fuel must be a non-negative number.");
+    }
+
+    if (openingFuel === Number(activeShift.opening_fuel)) {
+      message("Opening fuel was not changed.", "info");
+      return;
+    }
+
+    const correctedShift = await api(
+      `/api/fuel/shift/${activeShift.id}/opening`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          opening_fuel: openingFuel,
+          reason: "Opening fuel updated from shift data form.",
+        }),
+      },
+    );
+
+    activeShift = correctedShift;
+    $("openingFuel").value = correctedShift.opening_fuel;
+    updateOpeningFuelPermission();
+    message("Opening fuel saved.", "success");
+    await loadShiftReport();
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
 async function saveShiftProductionData() {
   try {
     if (!activeShift) {
@@ -579,13 +657,17 @@ async function saveShiftProductionData() {
       throw Error("Dredging hours cannot be negative.");
     }
 
-    await api(`/api/fuel/shift/${activeShift.id}/production-data`, {
-      method: "PUT",
-      body: JSON.stringify({
-        advancement_m: advancement,
-        dredging_hours: dredgingHours,
-      }),
-    });
+    const updatedShift = await api(
+      `/api/fuel/shift/${activeShift.id}/production-data`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          advancement_m: advancement,
+          dredging_hours: dredgingHours,
+        }),
+      },
+    );
+    activeShift = updatedShift;
 
     message("Shift production data saved.", "success");
     await loadShiftReport();
@@ -5555,6 +5637,7 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
     }
   }),
 );
+$('changeOpeningFuelButton').addEventListener('click', changeOpeningFuel);
 $("shiftVessel").addEventListener("change", refreshShiftEquipment);
 $("soundingVessel").addEventListener("change", loadSoundingShift);
 $("soundingDate").addEventListener("change", loadSoundingShift);
