@@ -4,7 +4,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "InsiteFuel V3"
     debug: bool = True
-    database_url: str
+
+    database_url: str = "postgresql+psycopg://postgres:root@localhost:5432/insitefuel_v3"
 
     sounding_deadline_hour: int = 6
     sounding_deadline_minute: int = 0
@@ -17,6 +18,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        env_prefix="INSITEFUEL_",
     )
 
 
