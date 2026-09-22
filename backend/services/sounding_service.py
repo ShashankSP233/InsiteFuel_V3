@@ -20,10 +20,11 @@ class SoundingService:
         Soundings for a shift/date are due by 06:00 UTC on the
         following calendar day.
         """
-        next_day = report_date + timedelta(days=1)
+        deadline_day = report_date + timedelta(days=1)
         return datetime.combine(
-            next_day,
+            deadline_day,
             time(6, 0),
+            tzinfo=now_ist().tzinfo,
         )
 
     @staticmethod
