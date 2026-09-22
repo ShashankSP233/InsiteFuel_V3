@@ -99,8 +99,30 @@ function params(data) {
   return q.toString();
 }
 function table(id, heads, rows) {
+  const isMasterTable = [
+    "projectsList",
+    "sitesList",
+    "vesselsList",
+    "equipmentList",
+  ].includes(id);
   $(id).innerHTML =
-    `<table><thead><tr>${heads.map((x) => `<th>${x}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${heads.length}" class="muted">No records.</td></tr>`}</tbody></table>`;
+    `${isMasterTable ? '<div class="master-table-scroll">' : ""}<table><thead><tr>${heads.map((x) => `<th>${x}</th>`).join("")}</tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${heads.length}" class="muted">No records.</td></tr>`}</tbody></table>${isMasterTable ? "</div>" : ""}`;
+
+  if (isMasterTable && rows.length > 7) {
+    const scroll = $(id).querySelector(".master-table-scroll");
+    const renderedTable = scroll?.querySelector("table");
+    const renderedRows = renderedTable?.tBodies[0]?.rows;
+
+    if (scroll && renderedTable && renderedRows) {
+      const headerHeight = renderedTable.tHead?.getBoundingClientRect().height || 0;
+      const rowsHeight = Array.from(renderedRows)
+        .slice(0, 7)
+        .reduce((height, row) => height + row.getBoundingClientRect().height, 0);
+      if (headerHeight > 0 && rowsHeight > 0) {
+        scroll.style.maxHeight = `${Math.ceil(headerHeight + rowsHeight)}px`;
+      }
+    }
+  }
 }
 async function login() {
   try {

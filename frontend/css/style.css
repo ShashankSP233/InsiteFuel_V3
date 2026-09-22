@@ -336,6 +336,10 @@ button,
   overflow-x: auto;
   margin-top: 8px;
 }
+.master-table-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+}
 table {
   width: 100%;
   border-collapse: collapse;
