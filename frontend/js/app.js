@@ -1718,9 +1718,10 @@ async function loadDashboard() {
     );
     table(
       "balancesTable",
-      ["Vessel", "Current fuel", "Threshold", "Days left", "Flags"],
+      ["Vessel", "Latest opening", "Latest closing", "Threshold", "Days left", "Flags"],
       b.map((x) => [
         esc(x.vessel_name),
+        f(x.latest_opening_fuel),
         f(x.current_fuel),
         f(x.fuel_threshold_litres),
         f(x.estimated_days_remaining),
@@ -2991,7 +2992,7 @@ function renderMasters() {
   // -----------------------------
   table(
     "vesselsList",
-    ["ID", "Project", "Site", "Vessel", "Code", "Type", "Threshold", "Status", "Actions"],
+    ["ID", "Project", "Site", "Vessel", "Code", "Type", "Manual min. (L)", "Status", "Actions"],
     vessels.map((x) => {
       const project = projects.find(
         (p) => Number(p.id) === Number(x.project_id),

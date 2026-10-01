@@ -1475,6 +1475,14 @@ Areas that may be developed further include:
 
 # Dashboard Considerations
 
+## Fuel Threshold Calculation
+
+The dashboard calculates each vessel's automatic fuel threshold from its average daily fuel consumption over the latest 10 calendar days, including the current day. Days with zero fuel consumption are excluded from the average so that idle days do not lower the calculated threshold.
+
+The calculated threshold is six times that average. The effective threshold is the greater of the calculated threshold and the vessel's manually entered minimum. Manual values remain saved and are not overwritten by the automatic calculation. If there are no positive-consumption days in the 10-day window, the manual threshold remains in effect.
+
+The selected dashboard reporting date range does not affect this threshold calculation; it continues to filter report data and date-range consumption figures.
+
 Planned dashboard functionality includes fuel-related operational information such as:
 
 - Transfer In

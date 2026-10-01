@@ -12,6 +12,7 @@ from backend.services.fuel_service import FuelService
 from backend.models.production import ProductionRecord
 from backend.models.project import Project
 from backend.services.sounding_service import SoundingService
+from backend.utils.time import now_ist
 
 
 ZERO = Decimal("0")
@@ -76,6 +77,13 @@ class DashboardService:
 
         shifts = db.scalars(query).all()
 
+        average_daily_by_vessel = (
+            DashboardService._get_average_daily_consumption_by_vessel(
+                db=db,
+                vessel_ids=list({shift.vessel_id for shift in shifts}),
+            )
+        )
+
         results: list[dict] = []
 
         for shift in shifts:
@@ -103,11 +111,15 @@ class DashboardService:
                 str(balance["closing_fuel"])
             )
 
-            threshold = Decimal(
+            manual_threshold = Decimal(
                 str(
                     vessel.fuel_threshold_litres
                     or 0
                 )
+            )
+            threshold = DashboardService._get_effective_threshold(
+                manual_threshold,
+                average_daily_by_vessel.get(vessel.id, ZERO),
             )
 
             flags = (
@@ -287,6 +299,59 @@ class DashboardService:
         return flags
 
     @staticmethod
+    def _get_effective_threshold(
+        manual_threshold: Decimal,
+        average_daily_consumption: Decimal,
+    ) -> Decimal:
+        calculated_threshold = average_daily_consumption * Decimal("6")
+        return max(manual_threshold, calculated_threshold)
+
+    @staticmethod
+    def _get_average_daily_consumption_by_vessel(
+        db: Session,
+        vessel_ids: list[int],
+    ) -> dict[int, Decimal]:
+        if not vessel_ids:
+            return {}
+
+        to_date = now_ist().date()
+        from_date = to_date - timedelta(days=9)
+        shifts = db.scalars(
+            select(Shift).where(
+                Shift.vessel_id.in_(vessel_ids),
+                Shift.shift_date >= from_date,
+                Shift.shift_date <= to_date,
+            )
+        ).all()
+
+        consumption_by_day: dict[tuple[int, date], Decimal] = {}
+        for shift in shifts:
+            balance = FuelService.calculate_shift_balance(
+                db,
+                shift.id,
+            )
+            day_key = (shift.vessel_id, shift.shift_date)
+            consumption_by_day[day_key] = (
+                consumption_by_day.get(day_key, ZERO)
+                + Decimal(str(balance["engine_consumption"] or 0))
+            )
+
+        positive_days_by_vessel: dict[int, list[Decimal]] = {}
+        for (current_vessel_id, _), consumption in consumption_by_day.items():
+            if consumption > ZERO:
+                positive_days_by_vessel.setdefault(
+                    current_vessel_id,
+                    [],
+                ).append(consumption)
+
+        return {
+            current_vessel_id: sum(daily_consumption, ZERO)
+            / Decimal(len(daily_consumption))
+            for current_vessel_id, daily_consumption
+            in positive_days_by_vessel.items()
+        }
+
+    @staticmethod
     def get_latest_closing_by_vessel(
         db: Session,
         vessel_ids: list[int] | None = None,
@@ -357,10 +422,43 @@ class DashboardService:
 
         vessels = db.scalars(query).all()
 
+        threshold_average_by_vessel = (
+            DashboardService._get_average_daily_consumption_by_vessel(
+                db=db,
+                vessel_ids=[vessel.id for vessel in vessels],
+            )
+        )
+
         latest_closing = DashboardService.get_latest_closing_by_vessel(
             db=db,
             vessel_ids=[v.id for v in vessels],
         )
+
+        latest_opening: dict[int, Decimal] = {}
+        latest_shifts = db.scalars(
+            select(Shift)
+            .where(
+                Shift.vessel_id.in_([v.id for v in vessels]),
+                Shift.calculated_closing_fuel.is_not(None),
+            )
+            .order_by(
+                Shift.vessel_id.asc(),
+                Shift.shift_date.desc(),
+                Shift.id.desc(),
+            )
+        ).all()
+
+        for shift in latest_shifts:
+            if shift.vessel_id in latest_opening:
+                continue
+
+            balance = FuelService.calculate_shift_balance(
+                db,
+                shift.id,
+            )
+            latest_opening[shift.vessel_id] = Decimal(
+                str(balance["opening_fuel"])
+            )
 
         shifts_query = (
             select(Shift)
@@ -425,8 +523,12 @@ class DashboardService:
             else:
                 estimated_days_remaining = None
 
-            threshold = Decimal(
+            manual_threshold = Decimal(
                 str(vessel.fuel_threshold_litres or 0)
+            )
+            threshold = DashboardService._get_effective_threshold(
+                manual_threshold,
+                threshold_average_by_vessel.get(vessel.id, ZERO),
             )
 
             flags = DashboardService._get_flags(
@@ -440,6 +542,10 @@ class DashboardService:
                     "vessel_name": vessel.name,
                     "project_id": vessel.project_id,
                     "current_fuel": current_fuel,
+                    "latest_opening_fuel": latest_opening.get(
+                        vessel.id,
+                        ZERO,
+                    ),
                     "fuel_threshold_litres": threshold,
                     "recent_consumption": recent_consumption,
                     "average_daily_consumption": average_daily_consumption,
@@ -794,6 +900,12 @@ class DashboardService:
             db=db,
             vessel_ids=[vessel.id for vessel, _ in vessel_records],
         )
+        threshold_average_by_vessel = (
+            DashboardService._get_average_daily_consumption_by_vessel(
+                db=db,
+                vessel_ids=[vessel.id for vessel, _ in vessel_records],
+            )
+        )
 
         vessel_totals = []
         project_data: dict[int, dict] = {}
@@ -863,8 +975,12 @@ class DashboardService:
                 ZERO,
             )
 
-            threshold = Decimal(
+            manual_threshold = Decimal(
                 str(vessel.fuel_threshold_litres or 0)
+            )
+            threshold = DashboardService._get_effective_threshold(
+                manual_threshold,
+                threshold_average_by_vessel.get(vessel.id, ZERO),
             )
 
             low_fuel = (

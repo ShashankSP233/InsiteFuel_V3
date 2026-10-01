@@ -83,6 +83,7 @@ class VesselFuelBalance(BaseModel):
     project_id: int | None = None
 
     current_fuel: Decimal
+    latest_opening_fuel: Decimal
     fuel_threshold_litres: Decimal
 
     recent_consumption: Decimal
