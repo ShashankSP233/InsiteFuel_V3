@@ -439,8 +439,8 @@
             </div>
 
             <div class="note">
-              The current open shift for each vessel will be selected
-              automatically
+              Transfer Date determines the shift date. Historical dates use
+              each vessel's open shift for that date.
             </div>
 
             <div class="grid">
@@ -453,6 +453,11 @@
               <div>
                 <label>Destination vessel</label>
                 <select id="transferTo"></select>
+              </div>
+
+              <div>
+                <label>Transfer Date</label>
+                <input id="transferDate" type="date" />
               </div>
 
               <div>
@@ -479,6 +484,10 @@
                 <input id="transferNotes" />
               </div>
 
+            </div>
+
+            <div id="transferShiftInfo" class="note transfer-shift-info">
+              Select vessels to load shifts.
             </div>
 
             <button
@@ -1310,6 +1319,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/ui/js/app.js?v=master-scroll-2"></script>
+    <script src="/ui/js/app.js?v=transfer-date-open-shifts-1"></script>
   </body>
 </html>

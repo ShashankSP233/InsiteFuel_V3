@@ -439,6 +439,10 @@ tr.row-submit td {
   border-left-color: var(--red);
   color: var(--red);
 }
+.transfer-shift-info {
+  margin-bottom: 0;
+  white-space: pre-line;
+}
 
 /* ── Login ── */
 #loginWrap {

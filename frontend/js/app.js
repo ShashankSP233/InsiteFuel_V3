@@ -12,7 +12,9 @@ let me,
   vessels = [],
   equipment = [],
   currentUsers = [],
-  activeShift;
+  activeShift,
+  transferShifts = null,
+  transferShiftRequest = 0;
 
 const token = () => sessionStorage.getItem("insitefuel.session");
 const esc = (s) =>
@@ -186,7 +188,7 @@ async function init() {
     x.style.display = ["MANAGER", "ADMIN"].includes(me.role) ? "" : "none";
   });
   await loadMaster();
-  ["shiftDate", "productionDate", "soundingDate", "dashTo"].forEach(
+  ["shiftDate", "productionDate", "soundingDate", "dashTo", "transferDate"].forEach(
     (id) => ($(id).value = today()),
   );
   if ($("chartFrom")) {
@@ -209,6 +211,7 @@ async function init() {
 
   await refreshShiftEquipment();
   await loadDashboard();
+  await refreshTransferShifts();
 }
 
 function clearShiftProductionFields() {
@@ -876,18 +879,20 @@ async function closeShift() {
   }
 }
 
-async function getCurrentTransferShift(vesselId) {
-  const todayDate = today();
+async function getTransferShift(vesselId, shiftDate, shiftName) {
+  return await api(
+    `/api/fuel/shift?${params({
+      vessel_id: vesselId,
+      shift_date: shiftDate,
+      shift_name: shiftName,
+    })}`,
+  );
+}
 
+async function getCurrentTransferShift(vesselId, shiftDate = today()) {
   // First check Morning.
   try {
-    const morning = await api(
-      `/api/fuel/shift?${params({
-        vessel_id: vesselId,
-        shift_date: todayDate,
-        shift_name: "MORNING",
-      })}`,
-    );
+    const morning = await getTransferShift(vesselId, shiftDate, "MORNING");
 
     if (morning && morning.status === "OPEN") {
       return morning;
@@ -898,13 +903,7 @@ async function getCurrentTransferShift(vesselId) {
 
   // Morning is closed or unavailable, so use Evening.
   try {
-    const evening = await api(
-      `/api/fuel/shift?${params({
-        vessel_id: vesselId,
-        shift_date: todayDate,
-        shift_name: "EVENING",
-      })}`,
-    );
+    const evening = await getTransferShift(vesselId, shiftDate, "EVENING");
 
     if (evening && evening.status === "OPEN") {
       return evening;
@@ -914,8 +913,83 @@ async function getCurrentTransferShift(vesselId) {
   }
 
   throw new Error(
-    `No open shift found for vessel ${vesselId} today.`,
+    shiftDate === today()
+      ? `No open current shift found for vessel ${vesselId}.`
+      : `No open shift found for vessel ${vesselId} on ${shiftDate}.`,
   );
+}
+
+async function refreshTransferShifts() {
+  const requestId = ++transferShiftRequest;
+  const fromVesselId = n($("transferFrom").value);
+  const toVesselId = n($("transferTo").value);
+  const transferDate = $("transferDate").value || today();
+  const selectedShift = $("transferShift").value;
+  const isHistorical = transferDate < today();
+  const info = $("transferShiftInfo");
+
+  transferShifts = null;
+
+  if (!fromVesselId || !toVesselId) {
+    info.textContent = "Select source and destination vessels to load shifts.";
+    return null;
+  }
+
+  if (fromVesselId === toVesselId) {
+    info.textContent = "Source and destination vessels must be different.";
+    return null;
+  }
+
+  info.textContent = "Loading shifts...";
+
+  try {
+    const [fromShift, toShift] = selectedShift && !isHistorical
+      ? await Promise.all([
+          getTransferShift(fromVesselId, transferDate, selectedShift),
+          getTransferShift(toVesselId, transferDate, selectedShift),
+        ])
+      : await Promise.all([
+          getCurrentTransferShift(fromVesselId, transferDate),
+          getCurrentTransferShift(toVesselId, transferDate),
+        ]);
+
+    if (requestId !== transferShiftRequest) return null;
+
+    const selectedShiftLabel = selectedShift && !isHistorical
+      ? `${selectedShift.toLowerCase()} shift`
+      : "shift";
+    const transferDateLabel = transferDate === today()
+      ? "today"
+      : `on ${transferDate}`;
+
+    if (fromShift.status !== "OPEN") {
+      throw Error(
+        `Source vessel does not have an open ${selectedShiftLabel} ${transferDateLabel}.`,
+      );
+    }
+    if (toShift.status !== "OPEN") {
+      throw Error(
+        `Destination vessel does not have an open ${selectedShiftLabel} ${transferDateLabel}.`,
+      );
+    }
+
+    transferShifts = {
+      fromVesselId,
+      toVesselId,
+      transferDate,
+      fromShift,
+      toShift,
+    };
+    info.textContent =
+      `Source: ${fromShift.shift_name} (${fromShift.status})\n` +
+      `Destination: ${toShift.shift_name} (${toShift.status})`;
+    return transferShifts;
+  } catch (e) {
+    if (requestId === transferShiftRequest) {
+      info.textContent = e.message;
+    }
+    return null;
+  }
 }
 
 
@@ -923,7 +997,6 @@ async function createTransfer() {
   try {
     const fromVesselId = n($("transferFrom").value);
     const toVesselId = n($("transferTo").value);
-    const selectedShift = $("transferShift").value;
     const quantity = n($("transferQty").value);
 
     if (!fromVesselId) {
@@ -942,68 +1015,10 @@ async function createTransfer() {
       throw Error("Transfer quantity must be greater than zero.");
     }
 
-    async function getShift(vesselId, shiftName) {
-      return await api(
-        `/api/fuel/shift?${params({
-          vessel_id: vesselId,
-          shift_date: today(),
-          shift_name: shiftName,
-        })}`,
-      );
-    }
+    const shifts = await refreshTransferShifts();
+    if (!shifts) throw Error("Unable to load shifts for the selected date.");
 
-    async function getCurrentShift(vesselId) {
-      // Check Morning first.
-      try {
-        const morning = await getShift(vesselId, "MORNING");
-
-        if (morning && morning.status === "OPEN") {
-          return morning;
-        }
-      } catch (e) {
-        // Morning does not exist.
-      }
-
-      // Morning is closed/not available, so use Evening.
-      try {
-        const evening = await getShift(vesselId, "EVENING");
-
-        if (evening && evening.status === "OPEN") {
-          return evening;
-        }
-      } catch (e) {
-        // Evening does not exist.
-      }
-
-      throw Error(
-        `No open current shift found for vessel ${vesselId}.`,
-      );
-    }
-
-    let fromShift;
-    let toShift;
-
-    if (selectedShift) {
-      // User explicitly selected Morning or Evening.
-      fromShift = await getShift(fromVesselId, selectedShift);
-      toShift = await getShift(toVesselId, selectedShift);
-
-      if (!fromShift || fromShift.status !== "OPEN") {
-        throw Error(
-          `Source vessel does not have an open ${selectedShift.toLowerCase()} shift today.`,
-        );
-      }
-
-      if (!toShift || toShift.status !== "OPEN") {
-        throw Error(
-          `Destination vessel does not have an open ${selectedShift.toLowerCase()} shift today.`,
-        );
-      }
-    } else {
-      // Auto mode.
-      fromShift = await getCurrentShift(fromVesselId);
-      toShift = await getCurrentShift(toVesselId);
-    }
+    const { fromShift, toShift, transferDate } = shifts;
 
     const r = await api("/api/transfers", {
       method: "POST",
@@ -1015,6 +1030,7 @@ async function createTransfer() {
         to_shift_id: toShift.id,
 
         initiated_quantity: quantity,
+  transfer_date: `${transferDate}T00:00:00.000Z`,
         notes: $("transferNotes").value.trim() || null,
       }),
     });
@@ -5662,6 +5678,10 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
 );
 $('changeOpeningFuelButton').addEventListener('click', changeOpeningFuel);
 $("shiftVessel").addEventListener("change", refreshShiftEquipment);
+$("transferFrom").addEventListener("change", refreshTransferShifts);
+$("transferTo").addEventListener("change", refreshTransferShifts);
+$("transferDate").addEventListener("change", refreshTransferShifts);
+$("transferShift").addEventListener("change", refreshTransferShifts);
 $("soundingVessel").addEventListener("change", loadSoundingShift);
 $("soundingDate").addEventListener("change", loadSoundingShift);
 $("soundingShift").addEventListener("change", loadSoundingShift);
