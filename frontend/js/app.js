@@ -255,6 +255,7 @@ function populateFuelSources() {
 
   vessels
     .filter(v => v.is_active !== false)
+    .filter(v => v.type == "Tanker")
     .forEach(v => {
       const option = document.createElement("option");
 
