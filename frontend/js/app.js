@@ -1924,6 +1924,14 @@ function chartVesselName(id) {
   return vessel?.name || `Vessel ${id}`;
 }
 
+function chartVesselCode(id){
+  const vessel = vessels.find(
+    (v) => Number(v.id) === Number(id)
+  );
+
+  return vessel?.code || `Vessel ${id}`;
+}
+
 
 // ============================================================
 // DATE HELPERS
@@ -3053,7 +3061,7 @@ function renderMasters() {
     ["ID", "Vessel", "Equipment", "Type", "Code", "Status", "Actions"],
     equipment.map((x) => [
       x.id,
-      x.vessel_id,
+      chartVesselCode(x.vessel_id),
       esc(x.name),
       esc(x.equipment_type),
       esc(x.code),
