@@ -1075,8 +1075,8 @@ async function loadTransfers() {
     ["ID", "From", "To", "Initiated", "Received", "Loss", "Status", "Actions"],
     rows.map((x) => [
       x.id,
-      x.from_vessel_id,
-      x.to_vessel_id,
+      chartVesselName(x.from_vessel_id),
+      chartVesselName(x.to_vessel_id),
       f(x.initiated_quantity),
       f(x.received_quantity),
       f(x.loss_quantity),
