@@ -71,6 +71,14 @@ function fmt(value) {
   return n.toFixed(3);
 }
 
+function litres(value) {
+  if (value == null || !Number.isFinite(Number(value))) {
+    return "—";
+  }
+
+  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
 
@@ -468,7 +476,7 @@ async function openShift() {
     populateShiftProductionFields();
     updateOpeningFuelPermission();
     $("shiftState").textContent =
-      `Shift #${s.id} · ${s.status} · opening ${f(s.opening_fuel)} L`;
+      `Shift #${s.id} · ${s.status} · opening ${litres(s.opening_fuel)} L`;
 
     await loadShiftReport();
     await loadShiftAttachments();
@@ -550,21 +558,21 @@ async function loadShiftReport() {
       ],
       [
         [
-          f(b.opening_fuel),
-          f(b.received_fuel),
-          f(b.transfer_in),
-          f(b.engine_consumption),
-          f(b.transfer_out),
-          `${f(b.adjustment_in)} / ${f(b.adjustment_out)}`,
+          litres(b.opening_fuel),
+          litres(b.received_fuel),
+          litres(b.transfer_in),
+          litres(b.engine_consumption),
+          litres(b.transfer_out),
+          `${litres(b.adjustment_in)} / ${litres(b.adjustment_out)}`,
           activeShift.advancement_m == null ? "—" : f(activeShift.advancement_m),
           activeShift.dredging_hours == null ? "—" : f(activeShift.dredging_hours),
-          f(b.closing_fuel),
+          litres(b.closing_fuel),
         ],
       ],
     );
 
     $("shiftState").textContent =
-      `Shift #${activeShift.id} · ${activeShift.status} · calculated closing ${f(b.closing_fuel)} L`;
+      `Shift #${activeShift.id} · ${activeShift.status} · calculated closing ${litres(b.closing_fuel)} L`;
 
     const eventRows = transactions.map((t) => {
       let details = "-";
@@ -591,7 +599,7 @@ async function loadShiftReport() {
         formatDateTime(t.transaction_date),
         type,
         details,
-        `${f(t.quantity)} L`,
+        `${litres(t.quantity)} L`,
         esc(t.remarks || "-"),
       ];
     });
@@ -809,12 +817,13 @@ async function addEngine() {
         start_time: start.toISOString(),
         stop_time: stop.toISOString(),
         lph_rate: Number(lph.toFixed(3)),
+        consumption,
         remarks: $("engineRemarks").value.trim() || null,
       }),
     });
 
     message(
-      `Engine event recorded: ${f(consumption)} L over ${hours.toFixed(2)} hours (${lph.toFixed(2)} L/hr).`,
+      `Engine event recorded: ${litres(consumption)} L over ${hours.toFixed(2)} hours (${lph.toFixed(2)} L/hr).`,
       "success",
     );
 
@@ -864,7 +873,7 @@ function calculateEngineRate() {
 
   lphField.value = lph.toFixed(3);
 
-  display.textContent = `Calculated ${hours.toFixed(2)} hours × ${lph.toFixed(2)} L/hr = ${f(consumption)} L`;
+  display.textContent = `Calculated ${hours.toFixed(2)} hours × ${lph.toFixed(2)} L/hr = ${litres(consumption)} L`;
 
   display.classList.remove("hidden");
 }
@@ -1077,9 +1086,9 @@ async function loadTransfers() {
       x.id,
       chartVesselName(x.from_vessel_id),
       chartVesselName(x.to_vessel_id),
-      f(x.initiated_quantity),
-      f(x.received_quantity),
-      f(x.loss_quantity),
+      litres(x.initiated_quantity),
+      litres(x.received_quantity),
+      litres(x.loss_quantity),
       esc(x.status),
       `${
         x.status === "INITIATED"
@@ -1306,7 +1315,7 @@ async function uploadShiftAttachment(type) {
           .map(
             (t, index) =>
               `${index + 1}. Transfer #${t.id} — ` +
-              `${f(t.initiated_quantity)} L`,
+              `${litres(t.initiated_quantity)} L`,
           )
           .join("\n");
 
@@ -1690,16 +1699,16 @@ async function loadDashboard() {
         api(`/api/dashboard/efficiency?${q}`),
       ]);
     $("kpis").innerHTML = [
-      ["Current fuel", d.total_fuel],
-      ["Received", d.total_received],
-      ["Consumption", d.total_consumption],
-      ["Transfer out", d.total_transfer_out],
-      ["Advancement", d.total_advancement_m],
-      ["Dredging hours", d.total_dredging_hours],
+      ["Current fuel", d.total_fuel, true],
+      ["Received", d.total_received, true],
+      ["Consumption", d.total_consumption, true],
+      ["Transfer out", d.total_transfer_out, true],
+      ["Advancement", d.total_advancement_m, false],
+      ["Dredging hours", d.total_dredging_hours, false],
     ]
       .map(
-        ([a, v]) =>
-          `<div class="kpi"><div>${a}</div><strong>${f(v)}</strong></div>`,
+        ([a, v, isFuel]) =>
+          `<div class="kpi"><div>${a}</div><strong>${isFuel ? litres(v) : f(v)}</strong></div>`,
       )
       .join("");
     table(
@@ -1722,12 +1731,12 @@ async function loadDashboard() {
         x.shift_date,
         esc(x.vessel_name),
         esc(x.shift_name),
-        f(x.opening_fuel),
-        f(x.received_fuel),
-        f(x.transfer_in),
-        f(x.total_engine_consumption),
-        f(x.transfer_out),
-        f(x.closing_fuel),
+        litres(x.opening_fuel),
+        litres(x.received_fuel),
+        litres(x.transfer_in),
+        litres(x.total_engine_consumption),
+        litres(x.transfer_out),
+        litres(x.closing_fuel),
         x.advancement_m == null ? "—" : f(x.advancement_m),
         x.dredging_hours == null ? "—" : f(x.dredging_hours),
         esc(x.flags.join(", ")),
@@ -1738,15 +1747,15 @@ async function loadDashboard() {
       ["Vessel", "Latest opening", "Latest closing", "Threshold", "Days left", "Flags"],
       b.map((x) => [
         esc(x.vessel_name),
-        f(x.latest_opening_fuel),
-        f(x.current_fuel),
-        f(x.fuel_threshold_litres),
+        litres(x.latest_opening_fuel),
+        litres(x.current_fuel),
+        litres(x.fuel_threshold_litres),
         f(x.estimated_days_remaining),
         esc(x.flags.join(", ")),
       ]),
     );
     $("efficiencyView").innerHTML =
-      `<div class="stat-row"><div class="stat-block"><div class="stat-label">Fuel consumed</div><div class="stat-val">${f(e.total_consumption)} L</div></div><div class="stat-block"><div class="stat-label">Production</div><div class="stat-val">${f(e.total_production)} m³</div></div><div class="stat-block"><div class="stat-label">L / m³</div><div class="stat-val">${f(e.consumption_per_unit)}</div></div></div>`;
+      `<div class="stat-row"><div class="stat-block"><div class="stat-label">Fuel consumed</div><div class="stat-val">${litres(e.total_consumption)} L</div></div><div class="stat-block"><div class="stat-label">Production</div><div class="stat-val">${f(e.total_production)} m³</div></div><div class="stat-block"><div class="stat-label">L / m³</div><div class="stat-val">${f(e.consumption_per_unit)}</div></div></div>`;
   } catch (e) {
     message(e.message, "error");
   }
@@ -3038,7 +3047,7 @@ function renderMasters() {
         esc(x.name),
         esc(x.code),
         esc(x.vessel_type),
-        f(x.fuel_threshold_litres),
+        litres(x.fuel_threshold_litres),
         `<button
           class="btn btn-sm ${x.is_active ? "btn-success" : "btn-danger"}"
           onclick="toggleVesselActive(${x.id}, ${x.is_active})">

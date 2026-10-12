@@ -12,6 +12,7 @@ class EngineEventCreate(BaseModel):
     stop_time: datetime
 
     lph_rate: Decimal = Field(ge=0)
+    consumption: Decimal | None = Field(default=None, ge=0)
 
     remarks: str | None = Field(
         default=None,

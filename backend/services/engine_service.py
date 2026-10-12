@@ -35,6 +35,7 @@ class EngineService:
         stop_time: datetime,
         lph_rate: Decimal,
         created_by_user_id: int,
+        consumption: Decimal | None = None,
         remarks: str | None = None,
     ) -> EngineEvent:
 
@@ -68,10 +69,14 @@ class EngineService:
             stop_time,
         )
 
-        # Calculate fuel consumption
-        consumption = (
-            hours_run * lph_rate
-        ).quantize(Decimal("0.001"))
+        if consumption is not None:
+            if consumption < 0:
+                raise ValueError("consumption cannot be negative")
+            consumption = consumption.quantize(Decimal("0.001"))
+        else:
+            consumption = (
+                hours_run * lph_rate
+            ).quantize(Decimal("0.001"))
 
         event = EngineEvent(
             shift_id=shift_id,

@@ -45,6 +45,7 @@ def create_engine_event(
             stop_time=data.stop_time,
             lph_rate=data.lph_rate,
             created_by_user_id=current_user.id,
+            consumption=data.consumption,
             remarks=data.remarks,
         )
 
