@@ -98,6 +98,7 @@ class DashboardService:
             balance = FuelService.calculate_shift_balance(
                 db,
                 shift.id,
+                lock = False
             )
 
             engine_data = (
@@ -329,6 +330,7 @@ class DashboardService:
             balance = FuelService.calculate_shift_balance(
                 db,
                 shift.id,
+                lock = False
             )
             day_key = (shift.vessel_id, shift.shift_date)
             consumption_by_day[day_key] = (
