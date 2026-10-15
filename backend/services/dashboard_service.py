@@ -1266,6 +1266,7 @@ class DashboardService:
             balance = FuelService.calculate_shift_balance(
                 db,
                 shift.id,
+                lock = False
             )
 
             closing_fuel = Decimal(

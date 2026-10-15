@@ -345,23 +345,31 @@ class FuelService:
 
         return shift
 
+    
     @staticmethod
     def calculate_shift_balance(
         db: Session,
         shift_id: int,
+        *,
+        lock: bool = True,
     ) -> dict[str, Decimal]:
         shift_hint = db.get(Shift, shift_id)
         if shift_hint is None:
             raise ValueError("Shift not found.")
 
-        FuelService.lock_vessels(db, [shift_hint.vessel_id])
-        shift = FuelService.lock_shifts(db, [shift_id])[shift_id]
+        if lock:
+            FuelService.lock_vessels(db, [shift_hint.vessel_id])
+            shift = FuelService.lock_shifts(db, [shift_id])[shift_id]
+        else:
+            # Read-only calculations must not acquire write locks.
+            shift = shift_hint
 
         transactions = db.scalars(
             select(FuelTransaction).where(
                 FuelTransaction.shift_id == shift_id
             )
         ).all()
+
 
         received_fuel = Decimal("0")
         transfer_in = Decimal("0")
