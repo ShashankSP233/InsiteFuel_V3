@@ -117,6 +117,116 @@ class SoundingService:
         return sounding
 
     @staticmethod
+    def _admin_record_values(sounding: Sounding) -> dict:
+        return {
+            "shift_id": sounding.shift_id,
+            "vessel_id": sounding.vessel_id,
+            "report_date": sounding.report_date.isoformat(),
+            "attachment_id": sounding.attachment_id,
+            "submitted_at": sounding.submitted_at.isoformat(),
+            "submitted_by_user_id": sounding.submitted_by_user_id,
+        }
+
+    @staticmethod
+    def _get_open_shift_for_sounding(db: Session, shift_id: int) -> Shift:
+        shift = db.scalar(
+            select(Shift).where(Shift.id == shift_id).with_for_update()
+        )
+        if shift is None:
+            raise ValueError("Shift not found.")
+        if shift.status != "OPEN":
+            raise ValueError("Soundings can only be changed on an OPEN shift.")
+        return shift
+
+    @staticmethod
+    def update_sounding_attachment(
+        db: Session,
+        *,
+        sounding_id: int,
+        shift_id: int,
+        attachment_id: int,
+        corrected_by_user_id: int,
+        reason: str,
+    ) -> Sounding:
+        shift = SoundingService._get_open_shift_for_sounding(db, shift_id)
+        sounding = db.get(Sounding, sounding_id)
+        if sounding is None:
+            raise ValueError("Sounding not found.")
+        if sounding.shift_id != shift.id or sounding.vessel_id != shift.vessel_id:
+            raise ValueError("Sounding does not belong to the selected shift.")
+
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+        if sounding.attachment_id == attachment_id:
+            raise ValueError("Replacement attachment is unchanged.")
+
+        attachment = db.get(Attachment, attachment_id)
+        if attachment is None:
+            raise ValueError("Attachment not found.")
+        if attachment.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise ValueError("Sounding attachment must be a JPEG, PNG, or WebP image.")
+
+        old_values = SoundingService._admin_record_values(sounding)
+        sounding.attachment_id = attachment.id
+        db.flush()
+        AuditService.log(
+            db=db,
+            user_id=corrected_by_user_id,
+            action="UPDATE_SOUNDING",
+            entity="soundings",
+            entity_id=sounding.id,
+            old_values=old_values,
+            new_values=SoundingService._admin_record_values(sounding),
+            reason=reason,
+            details="Sounding attachment corrected; shift and submission identity were unchanged.",
+        )
+        return sounding
+
+    @staticmethod
+    def delete_sounding(
+        db: Session,
+        *,
+        sounding_id: int,
+        shift_id: int,
+        deleted_by_user_id: int,
+        reason: str,
+    ) -> None:
+        shift = SoundingService._get_open_shift_for_sounding(db, shift_id)
+        sounding = db.get(Sounding, sounding_id)
+        if sounding is None:
+            raise ValueError("Sounding not found.")
+        if sounding.shift_id != shift.id or sounding.vessel_id != shift.vessel_id:
+            raise ValueError("Sounding does not belong to the selected shift.")
+
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+        count = db.scalar(
+            select(func.count(Sounding.id)).where(Sounding.shift_id == shift.id)
+        ) or 0
+        if count <= 1:
+            raise ValueError(
+                "Cannot delete the last sounding; add a replacement first."
+            )
+
+        old_values = SoundingService._admin_record_values(sounding)
+        sounding_id = sounding.id
+        db.delete(sounding)
+        db.flush()
+        AuditService.log(
+            db=db,
+            user_id=deleted_by_user_id,
+            action="DELETE_SOUNDING",
+            entity="soundings",
+            entity_id=sounding_id,
+            old_values=old_values,
+            new_values=None,
+            reason=reason,
+            details="Sounding record deleted; its shared attachment file was retained.",
+        )
+
+    @staticmethod
     def list_soundings(
         db: Session,
         shift_id: int,

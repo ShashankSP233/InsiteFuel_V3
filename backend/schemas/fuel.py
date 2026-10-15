@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,10 @@ class InitialOpeningFuelCreate(BaseModel):
 
 class OpeningFuelCorrection(BaseModel):
     opening_fuel: Decimal = Field(ge=0)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ShiftReopenRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
 
 
@@ -51,6 +56,28 @@ class FuelTransactionResponse(BaseModel):
 class ShiftProductionDataUpdate(BaseModel):
     advancement_m: Decimal | None = Field(default=None, ge=0)
     dredging_hours: Decimal | None = Field(default=None, ge=0)
+
+
+class AdminShiftProductionDataUpdate(ShiftProductionDataUpdate):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class AdminShiftCloseRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class AdminAdjustmentCorrection(BaseModel):
+    quantity: Decimal = Field(gt=0)
+    direction: Literal["IN", "OUT"]
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class AdminReceiptCorrection(BaseModel):
+    quantity: Decimal = Field(gt=0)
+    source_vessel_id: int | None = None
+    fuel_source: str | None = Field(default=None, max_length=200)
+    remarks: str | None = Field(default=None, max_length=500)
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class ShiftResponse(BaseModel):

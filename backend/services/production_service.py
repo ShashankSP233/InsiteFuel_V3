@@ -124,6 +124,108 @@ class ProductionService:
         return production
 
     @staticmethod
+    def _record_values(production: ProductionRecord) -> dict:
+        return {
+            "project_id": production.project_id,
+            "vessel_id": production.vessel_id,
+            "shift_id": production.shift_id,
+            "production_date": production.production_date.isoformat(),
+            "as_per_qty": str(production.as_per_qty),
+            "true_qty": str(production.true_qty),
+            "fuel_rate": (
+                str(production.fuel_rate)
+                if production.fuel_rate is not None
+                else None
+            ),
+            "remarks": production.remarks,
+        }
+
+    @staticmethod
+    def update_production(
+        db: Session,
+        *,
+        production_id: int,
+        as_per_qty: Decimal,
+        true_qty: Decimal,
+        fuel_rate: Decimal | None,
+        remarks: str | None,
+        corrected_by_user_id: int,
+        reason: str,
+    ) -> ProductionRecord:
+        production = db.get(ProductionRecord, production_id)
+        if production is None:
+            raise ValueError("Production record not found.")
+
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+        if as_per_qty < 0 or true_qty < 0:
+            raise ValueError("Production quantities cannot be negative.")
+        if fuel_rate is not None and fuel_rate < 0:
+            raise ValueError("Fuel rate cannot be negative.")
+
+        shift = db.get(Shift, production.shift_id)
+        vessel = db.get(Vessel, production.vessel_id)
+        project = db.get(Project, production.project_id)
+        if shift is None or vessel is None or project is None:
+            raise ValueError("Production record has a missing association.")
+        if shift.vessel_id != vessel.id or shift.shift_date != production.production_date:
+            raise ValueError("Production record does not match its associated shift.")
+        if vessel.project_id != project.id:
+            raise ValueError("Production vessel does not belong to its project.")
+
+        old_values = ProductionService._record_values(production)
+        production.as_per_qty = as_per_qty
+        production.true_qty = true_qty
+        production.fuel_rate = fuel_rate
+        production.remarks = remarks
+        db.flush()
+
+        AuditService.log(
+            db=db,
+            user_id=corrected_by_user_id,
+            action="UPDATE_PRODUCTION_RECORD",
+            entity="ProductionRecord",
+            entity_id=production.id,
+            old_values=old_values,
+            new_values=ProductionService._record_values(production),
+            reason=reason,
+            details="Production record corrected; shift and vessel associations were unchanged.",
+        )
+        return production
+
+    @staticmethod
+    def delete_production(
+        db: Session,
+        *,
+        production_id: int,
+        deleted_by_user_id: int,
+        reason: str,
+    ) -> None:
+        production = db.get(ProductionRecord, production_id)
+        if production is None:
+            raise ValueError("Production record not found.")
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+
+        old_values = ProductionService._record_values(production)
+        production_id = production.id
+        db.delete(production)
+        db.flush()
+        AuditService.log(
+            db=db,
+            user_id=deleted_by_user_id,
+            action="DELETE_PRODUCTION_RECORD",
+            entity="ProductionRecord",
+            entity_id=production_id,
+            old_values=old_values,
+            new_values=None,
+            reason=reason,
+            details="Production record deleted.",
+        )
+
+    @staticmethod
     def get_production(
         db: Session,
         production_id: int,

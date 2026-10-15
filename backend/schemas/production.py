@@ -54,3 +54,15 @@ class ProductionResponse(BaseModel):
 class ProductionCalculatedResponse(ProductionResponse):
     quantity_variance: Decimal
     achievement_percentage: Decimal | None
+
+
+class AdminProductionUpdate(BaseModel):
+    as_per_qty: Decimal = Field(ge=0)
+    true_qty: Decimal = Field(ge=0)
+    fuel_rate: Decimal | None = Field(default=None, ge=0)
+    remarks: str | None = Field(default=None, max_length=500)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class AdminProductionDelete(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)

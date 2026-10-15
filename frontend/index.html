@@ -73,6 +73,10 @@
           Users &amp; Backup
         </button>
 
+        <button class="tab-btn admin-only" data-page="adminShifts">
+          Shift Management
+        </button>
+
         <button class="tab-btn admin-only" data-page="audit">
           Audit Log
         </button>
@@ -1194,6 +1198,280 @@
 
         </section>
 
+
+        <!-- ============================================================
+             ADMIN SHIFT MANAGEMENT
+             ============================================================ -->
+
+        <section id="adminShifts" class="tabPage hidden">
+          <div class="card">
+            <div class="section-head">
+              <span class="dot"></span>
+              Find shifts
+            </div>
+
+            <div class="grid">
+              <div>
+                <label for="adminShiftVessel">Vessel</label>
+                <select id="adminShiftVessel"></select>
+              </div>
+              <div>
+                <label for="adminShiftFrom">From date</label>
+                <input id="adminShiftFrom" type="date">
+              </div>
+              <div>
+                <label for="adminShiftTo">To date</label>
+                <input id="adminShiftTo" type="date">
+              </div>
+              <div>
+                <label for="adminShiftName">Shift</label>
+                <select id="adminShiftName">
+                  <option value="">All shifts</option>
+                  <option value="MORNING">Morning</option>
+                  <option value="EVENING">Evening</option>
+                </select>
+              </div>
+              <div>
+                <label for="adminShiftStatus">Status</label>
+                <select id="adminShiftStatus">
+                  <option value="">All statuses</option>
+                  <option value="OPEN">Open</option>
+                  <option value="CLOSED">Closed</option>
+                </select>
+              </div>
+              <div>
+                <label>&nbsp;</label>
+                <button class="btn btn-primary" onclick="loadAdminShifts()">
+                  Search
+                </button>
+              </div>
+            </div>
+
+            <div id="adminShiftSearchStatus" class="muted mt8"></div>
+            <div id="adminShiftResults" class="table-wrap mt8"></div>
+          </div>
+
+          <div id="adminShiftDetails" class="hidden">
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Shift details
+              </div>
+              <div id="adminShiftSummary" class="table-wrap"></div>
+            </div>
+
+            <div id="adminOpeningFuelCard" class="card hidden">
+              <div class="section-head">
+                <span class="dot"></span>
+                Correct opening fuel
+              </div>
+              <div class="grid">
+                <div>
+                  <label for="adminOpeningFuelCurrent">Current opening fuel (L)</label>
+                  <input id="adminOpeningFuelCurrent" type="number" readonly>
+                </div>
+                <div>
+                  <label for="adminOpeningFuelProposed">Proposed opening fuel (L)</label>
+                  <input id="adminOpeningFuelProposed" type="number" min="0" step="0.001">
+                </div>
+                <div>
+                  <label for="adminOpeningFuelReason">Correction reason</label>
+                  <input id="adminOpeningFuelReason" maxlength="1000">
+                </div>
+              </div>
+              <button class="btn btn-primary mt8" onclick="correctAdminOpeningFuel()">
+                Save Opening Correction
+              </button>
+            </div>
+
+            <div id="adminShiftOperationalCard" class="card hidden">
+              <div class="section-head">
+                <span class="dot"></span>
+                Correct operational data
+              </div>
+              <div class="grid">
+                <div>
+                  <label for="adminShiftAdvancement">Advancement (m)</label>
+                  <input id="adminShiftAdvancement" type="number" min="0" step="0.01">
+                </div>
+                <div>
+                  <label for="adminShiftDredgingHours">Dredging hours</label>
+                  <input id="adminShiftDredgingHours" type="number" min="0" step="0.01">
+                </div>
+                <div>
+                  <label for="adminShiftDataReason">Correction reason</label>
+                  <input id="adminShiftDataReason" maxlength="1000">
+                </div>
+              </div>
+              <button class="btn btn-primary mt8" onclick="saveAdminShiftOperationalData()">
+                Save Correction
+              </button>
+            </div>
+
+            <div id="adminShiftCloseCard" class="card hidden">
+              <div class="section-head">
+                <span class="dot"></span>
+                Close shift
+              </div>
+              <label for="adminShiftCloseReason">Closing reason</label>
+              <input id="adminShiftCloseReason" maxlength="1000">
+              <button class="btn btn-warn mt8" onclick="closeAdminShift()">
+                Close Shift
+              </button>
+            </div>
+
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Fuel transactions
+              </div>
+              <div id="adminShiftTransactions" class="table-wrap"></div>
+            </div>
+
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Engine events
+              </div>
+              <div id="adminShiftEngineEvents" class="table-wrap"></div>
+              <div id="adminEngineManagement" class="mt8 hidden">
+                <button class="btn btn-primary" onclick="beginAdminEngineCreate()">
+                  Add Engine Event
+                </button>
+              </div>
+              <div id="adminEngineEditor" class="mt8 hidden">
+                <div id="adminEngineEditorTitle" class="section-head">
+                  Add engine event
+                </div>
+                <div class="grid">
+                  <div>
+                    <label for="adminEngineEquipment">Equipment</label>
+                    <select id="adminEngineEquipment"></select>
+                  </div>
+                  <div>
+                    <label for="adminEngineStart">Start</label>
+                    <input id="adminEngineStart" type="datetime-local" oninput="calculateAdminEngineRate()">
+                  </div>
+                  <div>
+                    <label for="adminEngineStop">Stop</label>
+                    <input id="adminEngineStop" type="datetime-local" oninput="calculateAdminEngineRate()">
+                  </div>
+                  <div>
+                    <label for="adminEngineConsumption">Consumption (L)</label>
+                    <input id="adminEngineConsumption" type="number" min="0.001" step="0.001" oninput="calculateAdminEngineRate()">
+                  </div>
+                  <div>
+                    <label for="adminEngineRate">Calculated L/hr</label>
+                    <input id="adminEngineRate" type="number" readonly>
+                  </div>
+                  <div>
+                    <label for="adminEngineRemarks">Remarks</label>
+                    <input id="adminEngineRemarks" maxlength="500">
+                  </div>
+                </div>
+                <div id="adminEngineReasonWrap" class="mt8 hidden">
+                  <label for="adminEngineReason">Correction reason</label>
+                  <textarea id="adminEngineReason" rows="2" maxlength="1000"></textarea>
+                </div>
+                <div class="flex mt8">
+                  <button id="adminEngineSaveButton" class="btn btn-primary" onclick="saveAdminEngineEvent()">
+                    Save Engine Event
+                  </button>
+                  <button class="btn btn-ghost" onclick="cancelAdminEngineEdit()">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Soundings
+              </div>
+              <div id="adminShiftSoundings" class="table-wrap"></div>
+              <button id="adminSoundingAddButton" class="btn btn-primary mt8 hidden" onclick="createAdminSounding()">
+                Add Sounding
+              </button>
+            </div>
+
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Transfers
+              </div>
+              <div id="adminShiftTransfers" class="table-wrap"></div>
+            </div>
+
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Production records
+              </div>
+              <div id="adminShiftProduction" class="table-wrap"></div>
+              <div id="adminProductionEditor" class="mt8 hidden">
+                <div id="adminProductionEditorTitle" class="section-head">Add production record</div>
+                <div class="grid">
+                  <div>
+                    <label for="adminProductionAs">As-per quantity</label>
+                    <input id="adminProductionAs" type="number" min="0" step="0.001">
+                  </div>
+                  <div>
+                    <label for="adminProductionTrue">True quantity</label>
+                    <input id="adminProductionTrue" type="number" min="0" step="0.001">
+                  </div>
+                  <div>
+                    <label for="adminProductionFuelRate">Fuel rate</label>
+                    <input id="adminProductionFuelRate" type="number" min="0" step="0.001">
+                  </div>
+                  <div>
+                    <label for="adminProductionRemarks">Remarks</label>
+                    <input id="adminProductionRemarks" maxlength="500">
+                  </div>
+                </div>
+                <div id="adminProductionReasonWrap" class="mt8 hidden">
+                  <label for="adminProductionReason">Correction reason</label>
+                  <input id="adminProductionReason" maxlength="1000">
+                </div>
+                <div class="flex mt8">
+                  <button id="adminProductionSaveButton" class="btn btn-primary" onclick="saveAdminProduction()">Save</button>
+                  <button class="btn btn-ghost" onclick="cancelAdminProduction()">Cancel</button>
+                </div>
+              </div>
+              <button id="adminProductionAddButton" class="btn btn-primary mt8" onclick="beginAdminProductionCreate()">
+                Add Production Record
+              </button>
+            </div>
+
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Shift attachments
+              </div>
+              <div id="adminShiftAttachments" class="table-wrap"></div>
+            </div>
+
+            <div class="card">
+              <div class="section-head">
+                <span class="dot"></span>
+                Audit history
+              </div>
+              <div id="adminShiftAudit" class="table-wrap"></div>
+            </div>
+
+            <div id="adminReopenCard" class="card hidden">
+              <div class="section-head">
+                <span class="dot"></span>
+                Reopen closed shift
+              </div>
+              <label for="adminShiftReason">Correction reason</label>
+              <textarea id="adminShiftReason" rows="3" maxlength="1000"></textarea>
+              <button class="btn btn-primary mt8" onclick="reopenAdminShift()">
+                Reopen Shift
+              </button>
+            </div>
+          </div>
+        </section>
 
         <!-- ============================================================
              AUDIT

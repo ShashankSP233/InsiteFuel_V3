@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.fuel import (
@@ -21,6 +21,101 @@ from backend.models.sounding import Sounding
 class FuelService:
 
     @staticmethod
+    def lock_vessels(db: Session, vessel_ids: list[int]) -> dict[int, Vessel]:
+        ordered_ids = sorted(set(vessel_ids))
+        if not ordered_ids:
+            return {}
+        vessels = list(
+            db.scalars(
+                select(Vessel)
+                .where(Vessel.id.in_(ordered_ids))
+                .order_by(Vessel.id)
+                .with_for_update()
+            ).all()
+        )
+        locked = {vessel.id: vessel for vessel in vessels}
+        if len(locked) != len(ordered_ids):
+            raise ValueError("One or more vessels were not found.")
+        return locked
+
+    @staticmethod
+    def lock_shifts(db: Session, shift_ids: list[int]) -> dict[int, Shift]:
+        ordered_ids = sorted(set(shift_ids))
+        if not ordered_ids:
+            return {}
+        shifts = list(
+            db.scalars(
+                select(Shift)
+                .where(Shift.id.in_(ordered_ids))
+                .order_by(Shift.id)
+                .with_for_update()
+            ).all()
+        )
+        locked = {shift.id: shift for shift in shifts}
+        if len(locked) != len(ordered_ids):
+            raise ValueError("One or more shifts were not found.")
+        return locked
+
+    @staticmethod
+    def lock_vessel_shifts(db: Session, vessel_id: int) -> list[Shift]:
+        FuelService.lock_vessels(db, [vessel_id])
+        return list(
+            db.scalars(
+                select(Shift)
+                .where(Shift.vessel_id == vessel_id)
+                .order_by(Shift.id)
+                .with_for_update()
+            ).all()
+        )
+
+    # ------------------------------------------------------------------
+    # Shift-ordering helpers.
+    #
+    # A vessel's shifts form one chain: MORNING -> EVENING -> next day's
+    # MORNING. These are the single definition of "later" used by every
+    # guard, so the rule cannot drift between services.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _shift_rank(shift_name) -> int:
+        """MORNING sorts before EVENING within the same date."""
+        return 1 if getattr(shift_name, "value", shift_name) == "EVENING" else 0
+
+    @staticmethod
+    def shift_order_key(shift) -> tuple:
+        return (
+            shift.shift_date,
+            FuelService._shift_rank(getattr(shift, "shift_name", None)),
+            shift.id,
+        )
+
+    @staticmethod
+    def is_later_shift(candidate, shift) -> bool:
+        """In-memory check: is ``candidate`` chronologically after ``shift``?"""
+        return FuelService.shift_order_key(candidate) > FuelService.shift_order_key(
+            shift
+        )
+
+    @staticmethod
+    def has_later_shift(db: Session, shift: Shift) -> bool:
+        """Does this vessel have any shift chronologically after ``shift``?"""
+        later = [Shift.shift_date > shift.shift_date]
+        if FuelService._shift_rank(getattr(shift, "shift_name", None)) == 0:
+            later.append(
+                and_(
+                    Shift.shift_date == shift.shift_date,
+                    Shift.shift_name == "EVENING",
+                )
+            )
+        return (
+            db.scalar(
+                select(Shift.id)
+                .where(Shift.vessel_id == shift.vessel_id, or_(*later))
+                .limit(1)
+            )
+            is not None
+        )
+
+    @staticmethod
     def get_or_create_shift(
         db: Session,
         vessel_id: int,
@@ -37,83 +132,101 @@ class FuelService:
         Opening fuel is always inherited from the immediately
         preceding shift.
 
+        A new shift can only be created when every earlier shift of the
+        vessel is CLOSED.
+
         The first-ever MORNING shift requires an authorized
         opening fuel to be established separately.
         """
 
         shift_name = shift_name.upper()
-
         if shift_name not in ("MORNING", "EVENING"):
             raise ValueError(
                 "shift_name must be either MORNING or EVENING."
             )
 
+        # Serialise shift creation per vessel *before* looking anything up,
+        # so two requests cannot both decide that the shift is missing.
+        FuelService.lock_vessels(db, [vessel_id])
+
         # ---------------------------------------------------------
         # 1. Return existing shift
         # ---------------------------------------------------------
-
         shift = db.scalar(
-            select(Shift).where(
+            select(Shift)
+            .where(
                 Shift.vessel_id == vessel_id,
                 Shift.shift_date == shift_date,
                 Shift.shift_name == shift_name,
             )
+            .with_for_update()
         )
-
         if shift:
             return shift
 
         # ---------------------------------------------------------
-        # 2. Determine the immediately preceding shift
+        # 2. Shifts that come before the new one in the chain
         # ---------------------------------------------------------
-
+        earlier = [Shift.shift_date < shift_date]
         if shift_name == "EVENING":
-            # Evening shift must follow the same day's Morning shift.
-            previous_shift = db.scalar(
-                select(Shift).where(
-                    Shift.vessel_id == vessel_id,
+            earlier.append(
+                and_(
                     Shift.shift_date == shift_date,
                     Shift.shift_name == "MORNING",
                 )
             )
+        latest_first = (
+            Shift.shift_date.desc(),
+            case((Shift.shift_name == "EVENING", 1), else_=0).desc(),
+            Shift.id.desc(),
+        )
 
-            if previous_shift is None:
-                raise ValueError(
-                    f"Cannot create Evening shift for {shift_date}: "
-                    "Morning shift does not exist."
-                )
-
-        else:
-            # Morning shift must follow the previous day's Evening shift.
-            previous_shift = db.scalar(
-                select(Shift).where(
-                    Shift.vessel_id == vessel_id,
-                    Shift.shift_date < shift_date,
-                    Shift.shift_name == "EVENING",
-                )
-                .order_by(Shift.shift_date.desc())
+        # ---------------------------------------------------------
+        # 3. No new shift while ANY earlier shift is still open
+        # ---------------------------------------------------------
+        open_shift = db.scalar(
+            select(Shift)
+            .where(
+                Shift.vessel_id == vessel_id,
+                or_(*earlier),
+                Shift.status == "OPEN",
+            )
+            .order_by(*latest_first)
+            .limit(1)
+        )
+        if open_shift is not None:
+            raise ValueError(
+                f"Previous open shift on {open_shift.shift_date.isoformat()} "
+                f"({open_shift.shift_name}) exists. "
+                "Close it before creating a new shift."
             )
 
-            if previous_shift is None:
-                raise ValueError(
-                    f"Cannot create Morning shift for {shift_date}: "
-                    "no previous Evening shift exists. "
-                    "The first-ever opening fuel must be established "
-                    "by an authorized Manager/Admin."
-                )
-
         # ---------------------------------------------------------
-        # 3. Previous shift must have a calculated closing fuel
+        # 4. The latest earlier shift supplies the opening fuel
         # ---------------------------------------------------------
-
-        if previous_shift.calculated_closing_fuel is None:
+        previous_shift = db.scalar(
+            select(Shift)
+            .where(Shift.vessel_id == vessel_id, or_(*earlier))
+            .order_by(*latest_first)
+            .limit(1)
+        )
+        if previous_shift is None:
+            raise ValueError(
+                f"Cannot create {shift_name} shift for {shift_date}: "
+                "no previous shift exists. The first-ever opening fuel "
+                "must be established through the authorized initial-opening-fuel workflow."
+            )
+        if (
+            previous_shift.calculated_closing_fuel is None
+            or Decimal(str(previous_shift.calculated_closing_fuel)) < 0
+        ):
             raise ValueError(
                 f"Previous shift {previous_shift.id} does not have "
-                "a calculated closing fuel."
+                "a valid calculated closing fuel."
             )
 
         # ---------------------------------------------------------
-        # 4. Create the new shift using previous closing
+        # 5. Create the new shift using previous closing
         # ---------------------------------------------------------
 
         shift = Shift(
@@ -165,6 +278,8 @@ class FuelService:
 
         if opening_fuel < 0:
             raise ValueError("Opening fuel cannot be negative.")
+
+        FuelService.lock_vessels(db, [vessel_id])
 
         existing_shift = db.scalar(
             select(Shift).where(
@@ -235,10 +350,12 @@ class FuelService:
         db: Session,
         shift_id: int,
     ) -> dict[str, Decimal]:
-        shift = db.get(Shift, shift_id)
-
-        if shift is None:
+        shift_hint = db.get(Shift, shift_id)
+        if shift_hint is None:
             raise ValueError("Shift not found.")
+
+        FuelService.lock_vessels(db, [shift_hint.vessel_id])
+        shift = FuelService.lock_shifts(db, [shift_id])[shift_id]
 
         transactions = db.scalars(
             select(FuelTransaction).where(
@@ -409,6 +526,11 @@ class FuelService:
             raise ValueError(
                 "Fuel transactions cannot be added to a closed shift."
             )
+        if FuelService.has_later_shift(db, shift):
+            raise ValueError(
+                "Fuel transactions cannot be added to a shift while later "
+                "shifts exist; downstream reconciliation is required first."
+            )
 
         transaction = FuelTransaction(
             shift_id=shift.id,
@@ -485,6 +607,131 @@ class FuelService:
             source_vessel_id=source_vessel_id,
             fuel_source=fuel_source,
         )
+
+    @staticmethod
+    def correct_admin_receipt(
+        db: Session,
+        *,
+        transaction_id: int,
+        quantity: Decimal,
+        source_vessel_id: int | None,
+        fuel_source: str | None,
+        remarks: str | None,
+        corrected_by_user_id: int,
+        reason: str,
+    ) -> FuelTransaction:
+        transaction_hint = db.get(FuelTransaction, transaction_id)
+        if transaction_hint is None:
+            raise ValueError("Fuel receipt not found.")
+        FuelService.lock_vessels(db, [transaction_hint.vessel_id])
+        shift = db.get(Shift, transaction_hint.shift_id)
+        if shift is None:
+            raise ValueError("Receipt shift not found.")
+        shift = FuelService.lock_shifts(db, [shift.id])[shift.id]
+        transaction = db.scalar(
+            select(FuelTransaction)
+            .where(FuelTransaction.id == transaction_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if transaction is None:
+            raise ValueError("Fuel receipt not found.")
+        if transaction.transaction_type != FuelTransactionType.RECEIPT.value:
+            raise ValueError("Only RECEIPT transactions can use this correction.")
+        if transaction.reference_type is not None or transaction.reference_id is not None:
+            raise ValueError("Linked receipt transactions cannot be corrected directly.")
+        if quantity <= 0:
+            raise ValueError("Receipt quantity must be greater than zero.")
+
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+
+        if transaction.shift_id != shift.id or transaction.vessel_id != shift.vessel_id:
+            raise ValueError("Receipt changed its shift or vessel while being corrected.")
+        if shift.status != "OPEN":
+            raise ValueError("Receipts can only be corrected on an OPEN shift.")
+        if shift.vessel_id != transaction.vessel_id:
+            raise ValueError("Receipt vessel does not match its shift.")
+
+        normalized_fuel_source = fuel_source.strip() if fuel_source else None
+        normalized_fuel_source = normalized_fuel_source or None
+        normalized_remarks = remarks.strip() if remarks else None
+        normalized_remarks = normalized_remarks or None
+
+        if source_vessel_id is not None:
+            if source_vessel_id == shift.vessel_id:
+                raise ValueError(
+                    "Source vessel cannot be the same as the receiving vessel."
+                )
+            source_vessel = db.get(Vessel, source_vessel_id)
+            if source_vessel is None:
+                raise ValueError("Source vessel not found.")
+            if not source_vessel.is_active:
+                raise ValueError("Source vessel is inactive.")
+
+        old_values = {
+            "shift_id": transaction.shift_id,
+            "vessel_id": transaction.vessel_id,
+            "transaction_type": transaction.transaction_type,
+            "quantity": str(transaction.quantity),
+            "source_vessel_id": transaction.source_vessel_id,
+            "fuel_source": transaction.fuel_source,
+            "transaction_date": transaction.transaction_date.isoformat(),
+            "remarks": transaction.remarks,
+        }
+        new_quantity = Decimal(str(quantity))
+        if (
+            Decimal(str(transaction.quantity)) == new_quantity
+            and transaction.source_vessel_id == source_vessel_id
+            and transaction.fuel_source == normalized_fuel_source
+            and transaction.remarks == normalized_remarks
+        ):
+            raise ValueError("Receipt correction does not change any values.")
+
+        has_later_shift = FuelService.has_later_shift(db, shift)
+        if has_later_shift and Decimal(str(transaction.quantity)) != new_quantity:
+            raise ValueError(
+                "Receipt quantity cannot be changed while later shifts exist; "
+                "downstream reconciliation is required first."
+            )
+
+        current_balance = FuelService.calculate_shift_balance(db, shift.id)
+        projected_closing = (
+            current_balance["closing_fuel"]
+            - Decimal(str(transaction.quantity))
+            + new_quantity
+        )
+        if projected_closing < 0:
+            raise ValueError("Correction would make the shift closing balance negative.")
+
+        transaction.quantity = new_quantity
+        transaction.source_vessel_id = source_vessel_id
+        transaction.fuel_source = normalized_fuel_source
+        transaction.remarks = normalized_remarks
+        FuelService.recalculate_shift(db, shift.id)
+
+        AuditService.log(
+            db=db,
+            user_id=corrected_by_user_id,
+            action="CORRECT_FUEL_RECEIPT",
+            entity="fuel_transactions",
+            entity_id=transaction.id,
+            old_values=old_values,
+            new_values={
+                "shift_id": transaction.shift_id,
+                "vessel_id": transaction.vessel_id,
+                "transaction_type": transaction.transaction_type,
+                "quantity": str(transaction.quantity),
+                "source_vessel_id": transaction.source_vessel_id,
+                "fuel_source": transaction.fuel_source,
+                "transaction_date": transaction.transaction_date.isoformat(),
+                "remarks": transaction.remarks,
+            },
+            reason=reason,
+            details="Standalone fuel receipt corrected; transaction date and shift identity were preserved.",
+        )
+        return transaction
 
     @staticmethod
     def record_transfer_in(
@@ -588,11 +835,14 @@ class FuelService:
         advancement_m: Decimal | None,
         dredging_hours: Decimal | None,
         updated_by_user_id: int | None = None,
+        correction_reason: str | None = None,
     ) -> Shift:
-        shift = db.get(Shift, shift_id)
-
-        if shift is None:
+        shift_hint = db.get(Shift, shift_id)
+        if shift_hint is None:
             raise ValueError("Shift not found.")
+
+        FuelService.lock_vessels(db, [shift_hint.vessel_id])
+        shift = FuelService.lock_shifts(db, [shift_id])[shift_id]
 
         if shift.status != "OPEN":
             raise ValueError(
@@ -604,6 +854,9 @@ class FuelService:
 
         if dredging_hours is not None and dredging_hours < 0:
             raise ValueError("Dredging hours cannot be negative.")
+
+        if correction_reason is not None and not correction_reason.strip():
+            raise ValueError("Correction reason is required.")
 
         old_values = {
             "advancement_m": (
@@ -642,6 +895,7 @@ class FuelService:
                     else None
                 ),
             },
+            reason=(correction_reason.strip() if correction_reason else None),
             details="Shift operator production data updated.",
         )
 
@@ -652,11 +906,14 @@ class FuelService:
         db: Session,
         shift_id: int,
         closed_by_user_id: int | None = None,
+        reason: str | None = None,
     ) -> Shift:
-        shift = db.get(Shift, shift_id)
-
-        if shift is None:
+        shift_hint = db.get(Shift, shift_id)
+        if shift_hint is None:
             raise ValueError("Shift not found.")
+
+        FuelService.lock_vessels(db, [shift_hint.vessel_id])
+        shift = FuelService.lock_shifts(db, [shift_id])[shift_id]
 
         if shift.status == "CLOSED":
             return shift
@@ -665,6 +922,9 @@ class FuelService:
             raise ValueError(
                 f"Shift cannot be closed from status '{shift.status}'."
             )
+
+        if reason is not None and not reason.strip():
+            raise ValueError("Close reason is required.")
 
         vessel = db.get(Vessel, shift.vessel_id)
         if vessel is not None and vessel.vessel_type == "Dredger":
@@ -774,7 +1034,62 @@ class FuelService:
                     else None
                 ),
             },
+            reason=reason.strip() if reason else None,
             details="Shift closed and final fuel balance calculated.",
+        )
+
+        return shift
+
+    @staticmethod
+    def reopen_shift(
+        db: Session,
+        shift_id: int,
+        reopened_by_user_id: int,
+        reason: str,
+    ) -> Shift:
+        shift_hint = db.get(Shift, shift_id)
+        if shift_hint is None:
+            raise ValueError("Shift not found.")
+
+        FuelService.lock_vessels(db, [shift_hint.vessel_id])
+        shift = FuelService.lock_shifts(db, [shift_id])[shift_id]
+
+        if shift.status != "CLOSED":
+            raise ValueError(
+                f"Shift cannot be reopened from status '{shift.status}'."
+            )
+
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+
+        old_values = {
+            "status": shift.status,
+            "closed_at": (
+                shift.closed_at.isoformat()
+                if shift.closed_at is not None
+                else None
+            ),
+        }
+
+        shift.status = "OPEN"
+        shift.closed_at = None
+
+        db.flush()
+
+        AuditService.log(
+            db=db,
+            user_id=reopened_by_user_id,
+            action="REOPEN_SHIFT",
+            entity="shifts",
+            entity_id=shift.id,
+            old_values=old_values,
+            new_values={
+                "status": shift.status,
+                "closed_at": None,
+            },
+            reason=reason,
+            details="Shift reopened by an administrator; ledger data was not changed.",
         )
 
         return shift
@@ -804,8 +1119,15 @@ class FuelService:
         corrected_by_user_id: int,
         reason: str,
     ) -> Shift:
-        shift = db.get(Shift, shift_id)
+        shift_hint = db.get(Shift, shift_id)
+        if shift_hint is None:
+            raise ValueError("Shift not found.")
 
+        vessel_shifts = FuelService.lock_vessel_shifts(db, shift_hint.vessel_id)
+        shift = next(
+            (candidate for candidate in vessel_shifts if candidate.id == shift_id),
+            None,
+        )
         if shift is None:
             raise ValueError("Shift not found.")
 
@@ -818,55 +1140,26 @@ class FuelService:
         if not reason or not reason.strip():
             raise ValueError("Correction reason is required.")
 
+        subsequent_shifts = [
+            candidate
+            for candidate in vessel_shifts
+            if FuelService.is_later_shift(candidate, shift)
+        ]
+        if subsequent_shifts:
+            raise ValueError(
+                "Opening fuel cannot be corrected while later shifts exist; "
+                "downstream reconciliation is required first."
+            )
+
         if old_opening_fuel == new_opening_fuel:
             return shift
 
-        # Correct the selected shift's opening
         shift.opening_fuel = new_opening_fuel
-
-        # Recalculate the selected shift
-        FuelService.recalculate_shift(
-            db,
-            shift_id,
-        )
-
-        # Find all existing shifts after this shift
-        subsequent_shifts = db.scalars(
-            select(Shift)
-            .where(
-                Shift.vessel_id == shift.vessel_id,
-                Shift.shift_date >= shift.shift_date,
-            )
-            .order_by(
-                Shift.shift_date.asc(),
-                Shift.id.asc(),
-            )
-        ).all()
-
-        previous_shift = shift
-
-        for next_shift in subsequent_shifts:
-            # Skip the shift we just corrected
-            if next_shift.id == shift.id:
-                continue
-
-            # The next shift opens with the previous shift's
-            # recalculated closing fuel.
-            if previous_shift.calculated_closing_fuel is None:
-                raise ValueError(
-                    f"Shift {previous_shift.id} has no calculated closing fuel."
-                )
-
-            next_shift.opening_fuel = Decimal(
-                str(previous_shift.calculated_closing_fuel)
-            )
-
-            FuelService.recalculate_shift(
-                db,
-                next_shift.id,
-            )
-
-            previous_shift = next_shift
+        balance = FuelService.calculate_shift_balance(db, shift_id)
+        if balance["closing_fuel"] < 0:
+            raise ValueError("Correction would make the shift closing balance negative.")
+        shift.calculated_closing_fuel = balance["closing_fuel"]
+        db.flush()
 
         AuditService.log(
             db=db,
@@ -882,12 +1175,109 @@ class FuelService:
             },
             reason=reason.strip(),
             details=(
-                f"Opening fuel corrected from "
-                f"{old_opening_fuel} to {new_opening_fuel}. "
-                f"Subsequent shift openings and closings were recalculated."
+                f"Opening fuel corrected from {old_opening_fuel} to "
+                f"{new_opening_fuel}. No later shifts existed or were changed."
             ),
         )
 
+        return shift
+
+    @staticmethod
+    def correct_admin_opening_fuel(
+        db: Session,
+        *,
+        shift_id: int,
+        new_opening_fuel: Decimal,
+        corrected_by_user_id: int,
+        reason: str,
+    ) -> Shift:
+        shift_hint = db.get(Shift, shift_id)
+        if shift_hint is None:
+            raise ValueError("Shift not found.")
+        vessel_shifts = FuelService.lock_vessel_shifts(db, shift_hint.vessel_id)
+        shift = next(
+            (candidate for candidate in vessel_shifts if candidate.id == shift_id),
+            None,
+        )
+        if shift is None:
+            raise ValueError("Shift not found.")
+        if shift.status != "OPEN":
+            raise ValueError("Opening fuel can only be corrected on an OPEN shift.")
+        if new_opening_fuel < 0:
+            raise ValueError("Opening fuel cannot be negative.")
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+
+        has_subsequent_shift = any(
+            FuelService.is_later_shift(candidate, shift)
+            for candidate in vessel_shifts
+        )
+        if has_subsequent_shift:
+            raise ValueError(
+                "Opening fuel cannot be corrected while later shifts exist; "
+                "downstream reconciliation is required first."
+            )
+
+        previous_shift = max(
+            (
+                candidate
+                for candidate in vessel_shifts
+                if FuelService.is_later_shift(shift, candidate)
+            ),
+            key=FuelService.shift_order_key,
+            default=None,
+        )
+        proposed = Decimal(str(new_opening_fuel))
+        if previous_shift is not None:
+            if previous_shift.calculated_closing_fuel is None:
+                raise ValueError(
+                    "Previous shift has no calculated closing fuel."
+                )
+            if proposed != Decimal(str(previous_shift.calculated_closing_fuel)):
+                raise ValueError(
+                    "Opening fuel must match the previous shift's calculated closing fuel."
+                )
+
+        old_value = Decimal(str(shift.opening_fuel))
+        old_closing_value = (
+            Decimal(str(shift.calculated_closing_fuel))
+            if shift.calculated_closing_fuel is not None
+            else None
+        )
+        if old_value == proposed:
+            raise ValueError("Corrected opening fuel is unchanged.")
+
+        shift.opening_fuel = proposed
+        balance = FuelService.calculate_shift_balance(db, shift.id)
+        if balance["closing_fuel"] < 0:
+            raise ValueError(
+                "Correction would make the shift closing balance negative."
+            )
+        shift.calculated_closing_fuel = balance["closing_fuel"]
+        db.flush()
+
+        AuditService.log(
+            db=db,
+            user_id=corrected_by_user_id,
+            action="CORRECT_SHIFT_OPENING_FUEL",
+            entity="shifts",
+            entity_id=shift.id,
+            old_values={
+                "opening_fuel": str(old_value),
+                "calculated_closing_fuel": (
+                    str(old_closing_value)
+                    if old_closing_value is not None
+                    else None
+                ),
+            },
+            new_values={
+                "opening_fuel": str(proposed),
+                "calculated_closing_fuel": str(balance["closing_fuel"]),
+            },
+            reason=reason,
+            details="Opening fuel corrected on the selected shift only; no later shifts existed.",
+        )
         return shift
 
     @staticmethod
@@ -940,22 +1330,40 @@ class FuelService:
                 "Correction remarks are required."
             )
 
-        current = db.get(FuelTransaction, adjustment_id)
+        current_hint = db.get(FuelTransaction, adjustment_id)
+        if current_hint is None:
+            raise ValueError("Adjustment transaction not found.")
 
+        shift_hint = db.get(Shift, current_hint.shift_id)
+        if shift_hint is None:
+            raise ValueError(
+                "Shift associated with adjustment was not found."
+            )
+        FuelService.lock_vessels(db, [shift_hint.vessel_id])
+        shift = FuelService.lock_shifts(db, [shift_hint.id])[shift_hint.id]
+        current = db.scalar(
+            select(FuelTransaction)
+            .where(FuelTransaction.id == adjustment_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if current is None:
             raise ValueError("Adjustment transaction not found.")
+        if current.shift_id != shift.id or current.vessel_id != shift.vessel_id:
+            raise ValueError("Adjustment changed its shift or vessel while being corrected.")
 
         if current.transaction_type != FuelTransactionType.ADJUSTMENT.value:
             raise ValueError(
                 "The selected transaction is not an adjustment."
             )
 
-        # A reversal is part of the correction history and must never
-        # itself be selected as the adjustment being corrected.
-        if current.reference_type == "ADJUSTMENT_CORRECTION_REVERSAL":
+        # Corrections must always start from the original adjustment.
+        if current.reference_type in {
+            "ADJUSTMENT_CORRECTION",
+            "ADJUSTMENT_CORRECTION_REVERSAL",
+        }:
             raise ValueError(
-                "A reversal transaction cannot be corrected directly. "
-                "Correct the effective adjustment instead."
+                "Select the original adjustment to correct its effective value."
             )
 
         if current.adjustment_direction not in (
@@ -966,42 +1374,55 @@ class FuelService:
                 "Adjustment has an invalid direction."
             )
 
-        # The adjustment being corrected must belong to a valid shift.
-        shift = db.get(Shift, current.shift_id)
-
-        if shift is None:
+        if shift.status != "OPEN":
             raise ValueError(
-                "Shift associated with adjustment was not found."
+                "Adjustments can only be corrected on an OPEN shift."
             )
 
-        old_quantity = Decimal(str(current.quantity))
+        effective = db.scalars(
+            select(FuelTransaction)
+            .where(
+                FuelTransaction.reference_type == "ADJUSTMENT_CORRECTION",
+                FuelTransaction.reference_id == current.id,
+            )
+            .order_by(FuelTransaction.id.desc())
+        ).first()
+        effective = effective or current
+
+        old_quantity = Decimal(str(effective.quantity))
         new_quantity = Decimal(str(new_quantity))
 
         # Do not create a correction if nothing actually changed.
         if (
             old_quantity == new_quantity
-            and current.adjustment_direction == new_direction.value
+            and effective.adjustment_direction == new_direction.value
         ):
             raise ValueError(
                 "Corrected adjustment is identical to the current adjustment."
             )
 
+        if FuelService.has_later_shift(db, shift):
+            raise ValueError(
+                "This correction would change fuel available to subsequent shifts; "
+                "downstream reconciliation is required first."
+            )
+
         # Reverse the currently effective adjustment.
         reversal_direction = (
             AdjustmentDirection.OUT
-            if current.adjustment_direction == AdjustmentDirection.IN.value
+            if effective.adjustment_direction == AdjustmentDirection.IN.value
             else AdjustmentDirection.IN
         )
 
         reversal = FuelTransaction(
-            shift_id=current.shift_id,
-            vessel_id=current.vessel_id,
+            shift_id=effective.shift_id,
+            vessel_id=effective.vessel_id,
             transaction_type=FuelTransactionType.ADJUSTMENT.value,
             quantity=old_quantity,
             adjustment_direction=reversal_direction.value,
             reference_type="ADJUSTMENT_CORRECTION_REVERSAL",
-            reference_id=current.id,
-            remarks=f"Reversal of adjustment #{current.id}",
+            reference_id=effective.id,
+            remarks=f"Reversal of adjustment #{effective.id}",
             created_by_user_id=corrected_by_user_id,
         )
 
@@ -1039,11 +1460,13 @@ class FuelService:
             entity_id=corrected.id,
             old_values={
                 "transaction_id": current.id,
+                "effective_transaction_id": effective.id,
                 "quantity": str(old_quantity),
-                "adjustment_direction": current.adjustment_direction,
+                "adjustment_direction": effective.adjustment_direction,
             },
             new_values={
                 "transaction_id": current.id,
+                "effective_transaction_id": corrected.id,
                 "quantity": str(new_quantity),
                 "adjustment_direction": new_direction.value,
             },

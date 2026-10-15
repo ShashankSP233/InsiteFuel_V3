@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SoundingResponse(BaseModel):
@@ -13,6 +13,19 @@ class SoundingResponse(BaseModel):
     submitted_by_user_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AdminSoundingCreate(BaseModel):
+    attachment_id: int
+
+
+class AdminSoundingUpdate(BaseModel):
+    attachment_id: int
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class AdminSoundingDelete(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class SoundingStatusResponse(BaseModel):

@@ -1,12 +1,12 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.dependencies import get_current_user
-from backend.models.user import User
+from backend.dependencies import get_current_user, require_roles
+from backend.models.user import User, UserRole
 from backend.services.shift_attachment_service import ShiftAttachmentService
 
 
@@ -23,6 +23,10 @@ class ShiftAttachmentCreate(BaseModel):
         "TRANSFER_NOTE",
         "SOUNDING",
     ]
+
+
+class ShiftAttachmentDelete(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 @router.post(
@@ -78,3 +82,32 @@ def get_shift_attachments(
         db=db,
         shift_id=shift_id,
     )
+
+
+@router.delete(
+    "/{shift_id}/attachments/{link_id}",
+    response_model=dict,
+)
+def remove_shift_attachment(
+    shift_id: int,
+    link_id: int,
+    payload: ShiftAttachmentDelete,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    try:
+        ShiftAttachmentService.remove_link(
+            db=db,
+            shift_id=shift_id,
+            link_id=link_id,
+            removed_by_user_id=current_user.id,
+            reason=payload.reason,
+        )
+        db.commit()
+        return {"removed": True, "link_id": link_id}
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )

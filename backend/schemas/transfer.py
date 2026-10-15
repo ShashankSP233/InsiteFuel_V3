@@ -88,4 +88,11 @@ class TransferCorrection(BaseModel):
         max_length=1000,
     )
 
+
+class AdminTransferCorrection(BaseModel):
+    initiated_quantity: Decimal | None = Field(default=None, gt=0)
+    received_quantity: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = Field(default=None, max_length=1000)
+    reason: str = Field(min_length=1, max_length=1000)
+
     

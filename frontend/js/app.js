@@ -13,6 +13,15 @@ let me,
   equipment = [],
   currentUsers = [],
   activeShift,
+  adminSelectedShift,
+  adminEngineEvents = [],
+  adminEditingEngineEventId = null,
+  adminFuelTransactions = [],
+  adminTransfers = [],
+  adminSoundings = [],
+  adminShiftAttachments = [],
+  adminProductionRecords = [],
+  adminEditingProductionId = null,
   transferShifts = null,
   transferShiftRequest = 0;
 
@@ -196,7 +205,7 @@ async function init() {
     x.style.display = ["MANAGER", "ADMIN"].includes(me.role) ? "" : "none";
   });
   await loadMaster();
-  ["shiftDate", "productionDate", "soundingDate", "dashTo", "transferDate"].forEach(
+  ["shiftDate", "productionDate", "soundingDate", "dashTo", "transferDate", "adminShiftFrom", "adminShiftTo"].forEach(
     (id) => ($(id).value = today()),
   );
   if ($("chartFrom")) {
@@ -299,6 +308,12 @@ async function loadMaster() {
   populateFuelSources();
   select("productionVessel", vessels);
   select("soundingVessel", vessels);
+  select("adminShiftVessel", vessels);
+  $("adminShiftVessel").innerHTML =
+    '<option value="">All vessels</option>' +
+    vessels
+      .map((vessel) => `<option value="${vessel.id}">${esc(vessel.name)}</option>`)
+      .join("");
   select("dashVessel", vessels, "name", true);
   select("productionProject", projects);
 
@@ -4697,6 +4712,1122 @@ function formatAuditJson(value) {
 
 
 // ============================================================
+// ADMIN SHIFT MANAGEMENT
+// ============================================================
+async function loadAdminShifts() {
+  try {
+    if (me.role !== "ADMIN") {
+      throw Error("Only an administrator can manage shifts.");
+    }
+    if (!confirmAdminEditorDiscard()) return;
+
+    const vesselId = $("adminShiftVessel").value;
+    const query = params({
+      from_date: $("adminShiftFrom").value,
+      to_date: $("adminShiftTo").value,
+      vessel_id: vesselId,
+      shift_name: $("adminShiftName").value,
+      shift_status: $("adminShiftStatus").value,
+    });
+
+    adminSelectedShift = undefined;
+    $("adminShiftSearchStatus").textContent = "Searching shifts...";
+    $("adminShiftDetails").classList.add("hidden");
+
+    const shifts = await api(`/api/fuel/admin/shifts?${query}`);
+
+    table(
+      "adminShiftResults",
+      ["Date", "Vessel", "Shift", "Status", ""],
+      shifts.map((shift) => [
+        esc(shift.shift_date),
+        esc(
+          vessels.find((item) => Number(item.id) === Number(shift.vessel_id))?.name ||
+          `Vessel #${shift.vessel_id}`,
+        ),
+        esc(shift.shift_name),
+        esc(shift.status),
+        `<button class="btn btn-sm" onclick="viewAdminShift(${shift.id})">View</button>`,
+      ]),
+    );
+    $("adminShiftSearchStatus").textContent = shifts.length
+      ? `${shifts.length} shift${shifts.length === 1 ? "" : "s"} found.`
+      : "No shifts match the selected filters.";
+  } catch (e) {
+    $("adminShiftSearchStatus").textContent = e.message;
+    message(e.message, "error");
+  }
+}
+
+async function viewAdminShift(shiftId, skipUnsavedPrompt = false) {
+  try {
+    if (me.role !== "ADMIN") {
+      throw Error("Only an administrator can view shift management.");
+    }
+    if (!skipUnsavedPrompt && !confirmAdminEditorDiscard()) return;
+
+    const [report, engineEvents, soundings] = await Promise.all([
+      api(`/api/fuel/shift/${shiftId}/report`),
+      api(`/api/engine/events?shift_id=${shiftId}`),
+      api(`/api/soundings?shift_id=${shiftId}`),
+    ]);
+    const shift = report.shift;
+    adminSelectedShift = shift;
+    adminFuelTransactions = report.transactions || [];
+    const [outgoingTransfers, incomingTransfers] = await Promise.all([
+      api(`/api/transfers?from_vessel_id=${shift.vessel_id}`),
+      api(`/api/transfers?to_vessel_id=${shift.vessel_id}`),
+    ]);
+    const allTransfers = [...outgoingTransfers, ...incomingTransfers];
+    $("adminShiftDetails").classList.remove("hidden");
+
+    const vessel = vessels.find((item) => item.id === shift.vessel_id);
+    const project = projects.find((item) => item.id === vessel?.project_id);
+    const site = sites.find((item) => item.id === vessel?.site_id);
+    const balance = report.balance;
+    table("adminShiftSummary", ["Stored field", "Value"], [
+      ["Date", esc(shift.shift_date)],
+      ["Vessel", esc(vessel?.name || `Vessel #${shift.vessel_id}`)],
+      ["Project", esc(project?.name || "-")],
+      ["Site", esc(site?.name || "-")],
+      ["Shift", esc(shift.shift_name)],
+      ["Status", esc(shift.status)],
+      ["Opening fuel", `${litres(shift.opening_fuel)} L`],
+      ["Calculated closing fuel", `${litres(shift.calculated_closing_fuel)} L`],
+      ["Calculated current balance", `${litres(balance.closing_fuel)} L`],
+      ["Advancement", shift.advancement_m == null ? "—" : `${esc(shift.advancement_m)} m`],
+      ["Dredging hours", shift.dredging_hours == null ? "—" : `${esc(shift.dredging_hours)} hr`],
+      ["Created", esc(formatDateTime(shift.created_at))],
+      ["Closed", esc(formatDateTime(shift.closed_at))],
+    ]);
+    $("adminShiftOperationalCard").classList.toggle("hidden", shift.status !== "OPEN");
+    $("adminShiftCloseCard").classList.toggle("hidden", shift.status !== "OPEN");
+    $("adminOpeningFuelCard").classList.toggle("hidden", shift.status !== "OPEN");
+    $("adminOpeningFuelCurrent").value = shift.opening_fuel;
+    $("adminOpeningFuelProposed").value = shift.opening_fuel;
+    $("adminOpeningFuelReason").value = "";
+    $("adminShiftAdvancement").value = shift.advancement_m ?? "";
+    $("adminShiftDredgingHours").value = shift.dredging_hours ?? "";
+    $("adminShiftDataReason").value = "";
+    $("adminShiftCloseReason").value = "";
+
+    table(
+      "adminShiftTransactions",
+      ["Date", "Type", "Direction", "Quantity", "Source / Reference", "Remarks", ""],
+      (report.transactions || []).map((transaction) => [
+        esc(formatDateTime(transaction.transaction_date)),
+        esc(String(transaction.transaction_type).replaceAll("_", " ")),
+        esc(transaction.adjustment_direction || "-"),
+        `${litres(transaction.quantity)} L`,
+        esc(
+          transaction.fuel_source ||
+          (transaction.source_vessel_id
+            ? `Vessel #${transaction.source_vessel_id}`
+            : transaction.reference_type
+              ? `${transaction.reference_type} #${transaction.reference_id}`
+              : "-"),
+        ),
+        esc(transaction.remarks || "-"),
+        shift.status === "OPEN" &&
+          transaction.transaction_type === "RECEIPT" &&
+          !transaction.reference_type &&
+          !transaction.reference_id
+          ? `<button class="btn btn-sm" onclick="correctAdminReceipt(${transaction.id})">Correct receipt</button>`
+          : shift.status === "OPEN" &&
+              transaction.transaction_type === "ADJUSTMENT" &&
+              !transaction.reference_type
+            ? `<button class="btn btn-sm" onclick="correctAdminAdjustment(${transaction.id})">Correct adjustment</button>`
+            : "—",
+      ]),
+    );
+    adminEngineEvents = engineEvents;
+    select(
+      "adminEngineEquipment",
+      equipment.filter((item) => Number(item.vessel_id) === Number(shift.vessel_id)),
+    );
+    const canManageEvents = shift.status === "OPEN";
+    $("adminEngineManagement").classList.toggle("hidden", !canManageEvents);
+    cancelAdminEngineEdit(true);
+    table(
+      "adminShiftEngineEvents",
+      ["Equipment", "Start", "Stop", "Hours", "Consumption", "Remarks", "Actions"],
+      engineEvents.map((event) => {
+        const item = equipment.find((equipmentItem) => equipmentItem.id === event.equipment_id);
+        const actions = canManageEvents
+          ? `<button class="btn btn-sm" onclick="beginAdminEngineEdit(${event.id})">Edit</button> <button class="btn btn-sm btn-ghost" onclick="deleteAdminEngineEvent(${event.id})">Delete</button>`
+          : "—";
+        return [
+          esc(item?.name || `Equipment #${event.equipment_id}`),
+          esc(formatDateTime(event.start_time)),
+          esc(formatDateTime(event.stop_time)),
+          esc(event.hours_run),
+          `${litres(event.consumption)} L`,
+          esc(event.remarks || "-"),
+          actions,
+        ];
+      }),
+    );
+    table(
+      "adminShiftSoundings",
+      ["Reported date", "Submitted", "Submitted by", "Attachment", "Actions"],
+      soundings.map((sounding) => [
+        esc(sounding.report_date),
+        esc(formatDateTime(sounding.submitted_at)),
+        esc(sounding.submitted_by_user_id),
+        `<button class="btn btn-sm" onclick="viewShiftAttachment(${sounding.attachment_id})">#${sounding.attachment_id}</button>`,
+        shift.status === "OPEN"
+          ? `<button class="btn btn-sm" onclick="correctAdminSounding(${sounding.id})">Edit</button> <button class="btn btn-sm btn-ghost" onclick="deleteAdminSounding(${sounding.id})">Delete</button>`
+          : "—",
+      ]),
+    );
+    adminSoundings = soundings;
+    $("adminSoundingAddButton").classList.toggle("hidden", shift.status !== "OPEN");
+    $("adminReopenCard").classList.toggle("hidden", shift.status !== "CLOSED");
+    $("adminShiftReason").value = "";
+    const selectedTransfers = allTransfers.filter((transfer) =>
+      Number(transfer.from_shift_id) === Number(shift.id) ||
+      Number(transfer.to_shift_id) === Number(shift.id),
+    );
+    await loadAdminShiftSupplementary(
+      shift,
+      report,
+      engineEvents,
+      soundings,
+      selectedTransfers,
+    );
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function loadAdminShiftSupplementary(
+  shift,
+  report,
+  engineEvents,
+  soundings,
+  transfersForShift,
+) {
+  adminTransfers = transfersForShift;
+  const [production, attachments, shiftAudit, engineAudit, productionAudit, transferAudit, soundingAudit, fuelAudit, attachmentLinkAudit, transferNotes] = await Promise.all([
+    api(`/api/production?shift_id=${shift.id}`),
+    api(`/api/shifts/${shift.id}/attachments`),
+    api(`/api/audit?entity=shifts&entity_id=${shift.id}&limit=500`),
+    api("/api/audit?entity=engine_events&limit=500"),
+    api("/api/audit?entity=ProductionRecord&limit=500"),
+    api("/api/audit?entity=transfers&limit=500"),
+    api("/api/audit?entity=soundings&limit=500"),
+    api("/api/audit?entity=fuel_transactions&limit=500"),
+    api("/api/audit?entity=shift_attachments&limit=500"),
+    Promise.all(transfersForShift.map(async (transfer) => ({
+      transferId: transfer.id,
+      attachments: await api(`/api/transfers/${transfer.id}/attachments`),
+    }))),
+  ]);
+
+  adminProductionRecords = production;
+  adminShiftAttachments = attachments;
+  cancelAdminProduction(true);
+  table(
+    "adminShiftProduction",
+    ["ID", "Date", "As-per", "True", "Variance", "Fuel rate", "Remarks", "Actions"],
+    production.map((record) => [
+      record.id,
+      esc(record.production_date),
+      f(record.as_per_qty),
+      f(record.true_qty),
+      f(Number(record.true_qty) - Number(record.as_per_qty)),
+      f(record.fuel_rate),
+      esc(record.remarks || "-"),
+      `<button class="btn btn-sm" onclick="beginAdminProductionEdit(${record.id})">Edit</button> <button class="btn btn-sm btn-ghost" onclick="deleteAdminProduction(${record.id})">Delete</button>`,
+    ]),
+  );
+
+  table(
+    "adminShiftAttachments",
+    ["Type", "File", "Size", "Added", "" , "Actions"],
+    attachments.map((attachment) => [
+      esc(attachment.attachment_type),
+      esc(attachment.original_filename),
+      `${f(attachment.file_size / 1024)} KB`,
+      esc(formatDateTime(attachment.created_at)),
+      `<button class="btn btn-sm" onclick="viewShiftAttachment(${attachment.attachment_id})">View</button>`,
+      `<button class="btn btn-sm btn-ghost" onclick="removeAdminShiftAttachment(${attachment.id})">Unlink</button>`,
+    ]),
+  );
+
+  const notesByTransfer = new Map(
+    transferNotes.map((item) => [item.transferId, item.attachments]),
+  );
+  table(
+    "adminShiftTransfers",
+    ["ID", "From vessel / shift", "To vessel / shift", "Initiated", "Received", "Loss", "Transfer date", "Status", "Lifecycle", "Notes", "Documents", "Actions"],
+    transfersForShift.map((transfer) => {
+      const documents = notesByTransfer.get(transfer.id) || [];
+      const documentLinks = documents.length
+        ? documents.map((note) => `<a href="#" onclick="viewShiftAttachment(${note.attachment_id}); return false;">#${note.attachment_id}</a>`).join(" ")
+        : "-";
+      const actions = shift.status === "OPEN" && transfer.status !== "REJECTED"
+        ? `<button class="btn btn-sm" onclick="correctAdminTransfer(${transfer.id})">Correct</button>`
+        : "—";
+      return [
+        `#${transfer.id}`,
+        `${esc(chartVesselName(transfer.from_vessel_id))} / #${transfer.from_shift_id}`,
+        `${esc(chartVesselName(transfer.to_vessel_id))} / #${transfer.to_shift_id}`,
+        `${litres(transfer.initiated_quantity)} L`,
+        transfer.received_quantity == null ? "—" : `${litres(transfer.received_quantity)} L`,
+        transfer.loss_quantity == null ? "—" : `${litres(transfer.loss_quantity)} L`,
+        esc(formatDateTime(transfer.transfer_date)),
+        esc(transfer.status),
+        esc(
+          `Initiated ${formatDateTime(transfer.initiated_at)} by #${transfer.initiated_by_user_id}; ` +
+          `received ${formatDateTime(transfer.received_at)} by #${transfer.received_by_user_id ?? "—"}; ` +
+          `reviewed ${formatDateTime(transfer.reviewed_at)} by #${transfer.reviewed_by_user_id ?? "—"}; ` +
+          `approved ${formatDateTime(transfer.approved_at)} by #${transfer.approved_by_user_id ?? "—"}`,
+        ),
+        esc([transfer.notes, transfer.manager_remark].filter(Boolean).join(" · ") || "-"),
+        documentLinks,
+        actions,
+      ];
+    }),
+  );
+
+  const eventIds = new Set(engineEvents.map((event) => Number(event.id)));
+  const productionIds = new Set(production.map((record) => Number(record.id)));
+  const transferIds = new Set(transfersForShift.map((transfer) => Number(transfer.id)));
+  const transactionIds = new Set((report.transactions || []).map((transaction) => Number(transaction.id)));
+  const sameShift = (values) => Number(values?.shift_id) === Number(shift.id);
+  const auditRows = [
+    ...shiftAudit,
+    ...engineAudit.filter((entry) => eventIds.has(Number(entry.entity_id)) || sameShift(entry.old_values) || sameShift(entry.new_values)),
+    ...productionAudit.filter((entry) => productionIds.has(Number(entry.entity_id)) || sameShift(entry.old_values) || sameShift(entry.new_values)),
+    ...transferAudit.filter((entry) => transferIds.has(Number(entry.entity_id))),
+    ...soundingAudit.filter((entry) => sameShift(entry.old_values) || sameShift(entry.new_values)),
+    ...fuelAudit.filter((entry) => transactionIds.has(Number(entry.entity_id))),
+    ...attachmentLinkAudit.filter((entry) => sameShift(entry.old_values) || sameShift(entry.new_values)),
+  ].sort((left, right) => new Date(right.created_at) - new Date(left.created_at));
+  table(
+    "adminShiftAudit",
+    ["Time", "User", "Action", "Entity", "Reason", "Previous values", "New values"],
+    auditRows.map((entry) => [
+      esc(formatDateTime(entry.created_at)),
+      esc(entry.user_id ?? "System"),
+      esc(entry.action),
+      `${esc(entry.entity)}${entry.entity_id == null ? "" : ` #${entry.entity_id}`}`,
+      esc(entry.reason || "-"),
+      esc(entry.old_values ? JSON.stringify(entry.old_values) : "-"),
+      esc(entry.new_values ? JSON.stringify(entry.new_values) : "-"),
+    ]),
+  );
+}
+
+const adminActionsInFlight = new Set();
+
+async function runAdminAction(key, action) {
+  if (adminActionsInFlight.has(key)) {
+    message("This operation is already in progress.", "info");
+    return;
+  }
+  const actionName = key.split(":", 1)[0];
+  const preserve =
+    actionName === "saveAdminEngineEvent"
+      ? "engine"
+      : actionName === "saveAdminProduction"
+        ? "production"
+        : actionName === "saveAdminShiftOperationalData"
+          ? "shift-operational"
+          : actionName === "correctAdminOpeningFuel"
+            ? "opening-fuel"
+            : actionName === "closeAdminShift"
+              ? "close-shift"
+              : actionName === "reopenAdminShift"
+                ? "reopen-shift"
+                : null;
+  if (!confirmAdminEditorDiscard(preserve)) return;
+  adminActionsInFlight.add(key);
+  try {
+    return await action();
+  } finally {
+    adminActionsInFlight.delete(key);
+  }
+}
+
+async function removeAdminShiftAttachment(linkId) {
+  try {
+    if (me.role !== "ADMIN") throw Error("Only an administrator can unlink attachments.");
+    const attachment = adminShiftAttachments.find((item) => item.id === linkId);
+    if (!attachment) throw Error("Shift attachment not found.");
+    if (attachment.attachment_type === "SOUNDING") {
+      throw Error("Manage sounding attachments through the sounding record.");
+    }
+    const reason = prompt(`Reason for unlinking ${attachment.original_filename}:`);
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+    if (!confirm(`Unlink ${attachment.original_filename} from Shift #${attachment.shift_id}? The file will be retained.\n\nReason: ${reason.trim()}`)) return;
+    await api(`/api/shifts/${attachment.shift_id}/attachments/${attachment.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Attachment unlinked; shared file retained.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function createAdminSounding() {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Soundings can only be added by an administrator to an OPEN shift.");
+    }
+    const attachmentText = prompt("Attachment ID for the uploaded sounding image:");
+    if (attachmentText === null) return;
+    const attachmentId = Number(attachmentText);
+    if (!Number.isInteger(attachmentId) || attachmentId <= 0) {
+      throw Error("Enter a valid attachment ID.");
+    }
+    await api(`/api/soundings/admin/${adminSelectedShift.id}`, {
+      method: "POST",
+      body: JSON.stringify({ attachment_id: attachmentId }),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Sounding added.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function correctAdminSounding(soundingId) {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Soundings can only be corrected by an administrator on an OPEN shift.");
+    }
+    const sounding = adminSoundings.find((item) => item.id === soundingId);
+    if (!sounding) throw Error("Sounding not found for the selected shift.");
+    const attachmentText = prompt("Replacement sounding image attachment ID:", sounding.attachment_id);
+    if (attachmentText === null) return;
+    const attachmentId = Number(attachmentText);
+    if (!Number.isInteger(attachmentId) || attachmentId <= 0) {
+      throw Error("Enter a valid attachment ID.");
+    }
+    const reason = prompt("Correction reason:");
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+    if (!confirm(`Change sounding #${sounding.id} attachment #${sounding.attachment_id} to #${attachmentId}?\n\nReason: ${reason.trim()}`)) return;
+    await api(`/api/soundings/admin/${adminSelectedShift.id}/${sounding.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ attachment_id: attachmentId, reason: reason.trim() }),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Sounding attachment corrected.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function deleteAdminSounding(soundingId) {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Soundings can only be deleted by an administrator on an OPEN shift.");
+    }
+    const sounding = adminSoundings.find((item) => item.id === soundingId);
+    if (!sounding) throw Error("Sounding not found for the selected shift.");
+    const reason = prompt(`Correction reason for deleting sounding #${sounding.id}:`);
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+    if (!confirm(`Delete sounding #${sounding.id}? The attachment file will be retained.\n\nReason: ${reason.trim()}`)) return;
+    await api(`/api/soundings/admin/${adminSelectedShift.id}/${sounding.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Sounding deleted.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+function adminDateTimeInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
+}
+
+function calculateAdminEngineRate() {
+  const start = new Date($("adminEngineStart").value);
+  const stop = new Date($("adminEngineStop").value);
+  const consumption = Number($("adminEngineConsumption").value);
+  const hours = (stop - start) / 3600000;
+  $("adminEngineRate").value =
+    Number.isFinite(hours) && hours > 0 && consumption > 0
+      ? (consumption / hours).toFixed(3)
+      : "";
+}
+
+function cancelAdminEngineEdit(force = false) {
+  const editor = $("adminEngineEditor");
+  const hasValues = [
+    $("adminEngineStart").value,
+    $("adminEngineStop").value,
+    $("adminEngineConsumption").value,
+    $("adminEngineRemarks").value,
+    $("adminEngineReason").value,
+  ].some((value) => value !== "");
+  if (
+    !force &&
+    !editor.classList.contains("hidden") &&
+    hasValues &&
+    !confirm("Discard unsaved engine event changes?")
+  ) {
+    return false;
+  }
+  adminEditingEngineEventId = null;
+  editor.classList.add("hidden");
+  $("adminEngineReasonWrap").classList.add("hidden");
+  $("adminEngineEditorTitle").textContent = "Add engine event";
+  $("adminEngineSaveButton").textContent = "Save Engine Event";
+  $("adminEngineStart").value = "";
+  $("adminEngineStop").value = "";
+  $("adminEngineConsumption").value = "";
+  $("adminEngineRate").value = "";
+  $("adminEngineRemarks").value = "";
+  $("adminEngineReason").value = "";
+  return true;
+}
+
+function confirmAdminEditorDiscard(preserve = null) {
+  const shift = adminSelectedShift;
+  const numberChanged = (inputId, storedValue) => {
+    const value = $(inputId).value;
+    if (value === "") return storedValue != null;
+    return storedValue == null || Number(value) !== Number(storedValue);
+  };
+  const operationalDirty =
+    numberChanged("adminShiftAdvancement", shift?.advancement_m) ||
+    numberChanged("adminShiftDredgingHours", shift?.dredging_hours) ||
+    Boolean($("adminShiftDataReason").value.trim());
+  const openingDirty =
+    numberChanged("adminOpeningFuelProposed", shift?.opening_fuel) ||
+    Boolean($("adminOpeningFuelReason").value.trim());
+  const closeDirty = Boolean($("adminShiftCloseReason").value.trim());
+  const reopenDirty = Boolean($("adminShiftReason").value.trim());
+  const dirtyShiftEditors = [
+    preserve !== "shift-operational" && operationalDirty ? "operational data" : null,
+    preserve !== "opening-fuel" && openingDirty ? "opening fuel" : null,
+    preserve !== "close-shift" && closeDirty ? "close reason" : null,
+    preserve !== "reopen-shift" && reopenDirty ? "reopen reason" : null,
+  ].filter(Boolean);
+  if (
+    dirtyShiftEditors.length &&
+    !confirm(`Discard unsaved ${dirtyShiftEditors.join(", ")}?`)
+  ) {
+    return false;
+  }
+
+  const productionEditor = $("adminProductionEditor");
+  const productionHasValues = [
+    $("adminProductionAs").value,
+    $("adminProductionTrue").value,
+    $("adminProductionFuelRate").value,
+    $("adminProductionRemarks").value,
+    $("adminProductionReason").value,
+  ].some((value) => value !== "");
+  if (
+    preserve !== "production" &&
+    !productionEditor.classList.contains("hidden") &&
+    productionHasValues &&
+    !confirm("Discard unsaved production record changes?")
+  ) {
+    return false;
+  }
+
+  const engineEditor = $("adminEngineEditor");
+  const engineHasValues = [
+    $("adminEngineStart").value,
+    $("adminEngineStop").value,
+    $("adminEngineConsumption").value,
+    $("adminEngineRemarks").value,
+    $("adminEngineReason").value,
+  ].some((value) => value !== "");
+  if (
+    preserve !== "engine" &&
+    !engineEditor.classList.contains("hidden") &&
+    engineHasValues &&
+    !confirm("Discard unsaved engine event changes?")
+  ) {
+    return false;
+  }
+
+  if (preserve !== "production") cancelAdminProduction(true);
+  if (preserve !== "engine") cancelAdminEngineEdit(true);
+  if (preserve !== "shift-operational") {
+    $("adminShiftAdvancement").value = shift?.advancement_m ?? "";
+    $("adminShiftDredgingHours").value = shift?.dredging_hours ?? "";
+    $("adminShiftDataReason").value = "";
+  }
+  if (preserve !== "opening-fuel") {
+    $("adminOpeningFuelProposed").value = shift?.opening_fuel ?? "";
+    $("adminOpeningFuelReason").value = "";
+  }
+  if (preserve !== "close-shift") $("adminShiftCloseReason").value = "";
+  if (preserve !== "reopen-shift") $("adminShiftReason").value = "";
+  return true;
+}
+
+function beginAdminEngineCreate() {
+  if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+    message("Engine events can only be added by an administrator to an OPEN shift.", "error");
+    return;
+  }
+  if (!confirmAdminEditorDiscard()) return;
+  cancelAdminEngineEdit();
+  $("adminEngineEditor").classList.remove("hidden");
+  $("adminEngineEquipment").value = $("adminEngineEquipment").options[0]?.value || "";
+}
+
+function beginAdminEngineEdit(eventId) {
+  if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+    message("Engine events can only be edited by an administrator on an OPEN shift.", "error");
+    return;
+  }
+  const event = adminEngineEvents.find((item) => item.id === eventId);
+  if (!event) {
+    message("Engine event not found in the selected shift.", "error");
+    return;
+  }
+  if (!confirmAdminEditorDiscard()) return;
+
+  adminEditingEngineEventId = event.id;
+  $("adminEngineEquipment").value = String(event.equipment_id);
+  $("adminEngineStart").value = adminDateTimeInput(event.start_time);
+  $("adminEngineStop").value = adminDateTimeInput(event.stop_time);
+  $("adminEngineConsumption").value = event.consumption;
+  $("adminEngineRemarks").value = event.remarks || "";
+  $("adminEngineReason").value = "";
+  $("adminEngineReasonWrap").classList.remove("hidden");
+  $("adminEngineEditorTitle").textContent = `Edit engine event #${event.id}`;
+  $("adminEngineSaveButton").textContent = "Save Correction";
+  $("adminEngineEditor").classList.remove("hidden");
+  calculateAdminEngineRate();
+}
+
+async function saveAdminEngineEvent() {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Engine events can only be changed by an administrator on an OPEN shift.");
+    }
+    const equipmentId = Number($("adminEngineEquipment").value);
+    const start = new Date($("adminEngineStart").value);
+    const stop = new Date($("adminEngineStop").value);
+    const consumption = Number($("adminEngineConsumption").value);
+    if (!equipmentId) throw Error("Select equipment.");
+    if (Number.isNaN(start.getTime()) || Number.isNaN(stop.getTime())) {
+      throw Error("Enter valid start and stop times.");
+    }
+    if (stop <= start) throw Error("Stop time must be after start time.");
+    if (!Number.isFinite(consumption) || consumption <= 0) {
+      throw Error("Engine consumption must be greater than zero.");
+    }
+
+    const hours = (stop - start) / 3600000;
+    const payload = {
+      equipment_id: equipmentId,
+      start_time: start.toISOString(),
+      stop_time: stop.toISOString(),
+      lph_rate: Number((consumption / hours).toFixed(3)),
+      consumption,
+      remarks: $("adminEngineRemarks").value.trim() || null,
+    };
+    let successMessage;
+    if (adminEditingEngineEventId !== null) {
+      const reason = $("adminEngineReason").value.trim();
+      if (!reason) throw Error("Enter a correction reason.");
+      const oldEvent = adminEngineEvents.find(
+        (event) => event.id === adminEditingEngineEventId,
+      );
+      if (!oldEvent) throw Error("Engine event not found in the selected shift.");
+      const oldEquipment = equipment.find(
+        (item) => Number(item.id) === Number(oldEvent.equipment_id),
+      )?.name || `Equipment #${oldEvent.equipment_id}`;
+      const newEquipment = equipment.find(
+        (item) => Number(item.id) === equipmentId,
+      )?.name || `Equipment #${equipmentId}`;
+      if (!confirm(
+        `Correct engine event #${oldEvent.id}?\n` +
+        `Equipment: ${oldEquipment} → ${newEquipment}\n` +
+        `Start: ${formatDateTime(oldEvent.start_time)} → ${formatDateTime(start.toISOString())}\n` +
+        `Stop: ${formatDateTime(oldEvent.stop_time)} → ${formatDateTime(stop.toISOString())}\n` +
+        `Consumption: ${oldEvent.consumption} L → ${consumption} L\n` +
+        `Remarks: ${oldEvent.remarks || "—"} → ${$("adminEngineRemarks").value.trim() || "—"}\n\n` +
+        `Reason: ${reason}`,
+      )) return;
+      payload.reason = reason;
+      await api(
+        `/api/engine/shift/${adminSelectedShift.id}/events/${adminEditingEngineEventId}`,
+        { method: "PUT", body: JSON.stringify(payload) },
+      );
+      successMessage = "Engine event correction saved.";
+    } else {
+      payload.shift_id = adminSelectedShift.id;
+      await api(`/api/engine/shift/${adminSelectedShift.id}/events`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      successMessage = "Engine event added.";
+    }
+
+    const shiftId = adminSelectedShift.id;
+    cancelAdminEngineEdit(true);
+    await viewAdminShift(shiftId, true);
+    message(successMessage, "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function deleteAdminEngineEvent(eventId) {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Engine events can only be deleted by an administrator on an OPEN shift.");
+    }
+    const event = adminEngineEvents.find((item) => item.id === eventId);
+    if (!event) throw Error("Engine event not found in the selected shift.");
+
+    const reason = prompt(`Correction reason for deleting engine event #${event.id}:`);
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+    if (!confirm(`Delete engine event #${event.id}?\n\nReason: ${reason.trim()}`)) return;
+
+    await api(`/api/engine/shift/${adminSelectedShift.id}/events/${event.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Engine event deleted.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function saveAdminShiftOperationalData() {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Operational data can only be corrected by an administrator on an OPEN shift.");
+    }
+    const reason = $("adminShiftDataReason").value.trim();
+    if (!reason) throw Error("Enter a correction reason.");
+    const advancement = $("adminShiftAdvancement").value;
+    const dredgingHours = $("adminShiftDredgingHours").value;
+    const advancementValue = advancement === "" ? null : Number(advancement);
+    const dredgingValue = dredgingHours === "" ? null : Number(dredgingHours);
+    if (advancementValue !== null && (!Number.isFinite(advancementValue) || advancementValue < 0)) {
+      throw Error("Advancement must be a non-negative number.");
+    }
+    if (dredgingValue !== null && (!Number.isFinite(dredgingValue) || dredgingValue < 0)) {
+      throw Error("Dredging hours must be a non-negative number.");
+    }
+
+    const shift = adminSelectedShift;
+    const confirmation =
+      `Correct Shift #${shift.id}?\n` +
+      `Advancement: ${shift.advancement_m ?? "—"} → ${advancementValue ?? "—"}\n` +
+      `Dredging hours: ${shift.dredging_hours ?? "—"} → ${dredgingValue ?? "—"}\n` +
+      `Reason: ${reason}`;
+    if (!confirm(confirmation)) return;
+
+    await api(`/api/fuel/admin/shift/${shift.id}/operational-data`, {
+      method: "PUT",
+      body: JSON.stringify({
+        advancement_m: advancementValue,
+        dredging_hours: dredgingValue,
+        reason,
+      }),
+    });
+    await viewAdminShift(shift.id, true);
+    message("Shift operational data corrected.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function correctAdminOpeningFuel() {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Opening fuel can only be corrected by an administrator on an OPEN shift.");
+    }
+    const openingFuel = Number($("adminOpeningFuelProposed").value);
+    const reason = $("adminOpeningFuelReason").value.trim();
+    if (!Number.isFinite(openingFuel) || openingFuel < 0) {
+      throw Error("Opening fuel must be a non-negative number.");
+    }
+    if (!reason) throw Error("Enter a correction reason.");
+    const shift = adminSelectedShift;
+    if (!confirm(`Correct opening fuel for Shift #${shift.id}?\n${shift.opening_fuel} L → ${openingFuel} L\n\nReason: ${reason}`)) return;
+    await api(`/api/fuel/admin/shift/${shift.id}/opening`, {
+      method: "PATCH",
+      body: JSON.stringify({ opening_fuel: openingFuel, reason }),
+    });
+    await viewAdminShift(shift.id, true);
+    message("Opening fuel corrected; downstream shifts were not changed.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function closeAdminShift() {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Only an administrator can close an OPEN shift here.");
+    }
+    const reason = $("adminShiftCloseReason").value.trim();
+    if (!reason) throw Error("Enter a closing reason.");
+    const shift = adminSelectedShift;
+    if (!confirm(`Close Shift #${shift.id} (${shift.shift_name}, ${shift.shift_date})?\n\nReason: ${reason}`)) {
+      return;
+    }
+    await api(`/api/fuel/admin/shift/${shift.id}/close`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    await viewAdminShift(shift.id, true);
+    message("Shift closed after backend validation.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+function cancelAdminProduction(force = false) {
+  const editor = $("adminProductionEditor");
+  const hasValues = [
+    $("adminProductionAs").value,
+    $("adminProductionTrue").value,
+    $("adminProductionFuelRate").value,
+    $("adminProductionRemarks").value,
+    $("adminProductionReason").value,
+  ].some((value) => value !== "");
+  if (!force && !editor.classList.contains("hidden") && hasValues && !confirm("Discard this production record edit?")) {
+    return false;
+  }
+  adminEditingProductionId = null;
+  editor.classList.add("hidden");
+  $("adminProductionReasonWrap").classList.add("hidden");
+  $("adminProductionEditorTitle").textContent = "Add production record";
+  $("adminProductionSaveButton").textContent = "Save";
+  $("adminProductionAs").value = "";
+  $("adminProductionTrue").value = "";
+  $("adminProductionFuelRate").value = "";
+  $("adminProductionRemarks").value = "";
+  $("adminProductionReason").value = "";
+  return true;
+}
+
+function beginAdminProductionCreate() {
+  if (me.role !== "ADMIN" || !adminSelectedShift) {
+    message("Select a shift before adding production.", "error");
+    return;
+  }
+  if (!confirmAdminEditorDiscard()) return;
+  cancelAdminProduction(true);
+  $("adminProductionEditor").classList.remove("hidden");
+}
+
+function beginAdminProductionEdit(productionId) {
+  if (me.role !== "ADMIN") {
+    message("Only an administrator can edit production records.", "error");
+    return;
+  }
+  const record = adminProductionRecords.find((item) => item.id === productionId);
+  if (!record) {
+    message("Production record not found for this shift.", "error");
+    return;
+  }
+  if (!confirmAdminEditorDiscard()) return;
+  cancelAdminProduction(true);
+  adminEditingProductionId = record.id;
+  $("adminProductionAs").value = record.as_per_qty;
+  $("adminProductionTrue").value = record.true_qty;
+  $("adminProductionFuelRate").value = record.fuel_rate ?? "";
+  $("adminProductionRemarks").value = record.remarks || "";
+  $("adminProductionReasonWrap").classList.remove("hidden");
+  $("adminProductionEditorTitle").textContent = `Edit production record #${record.id}`;
+  $("adminProductionSaveButton").textContent = "Save Correction";
+  $("adminProductionEditor").classList.remove("hidden");
+}
+
+async function saveAdminProduction() {
+  try {
+    if (me.role !== "ADMIN" || !adminSelectedShift) {
+      throw Error("Select a shift before saving production.");
+    }
+    const asPer = Number($("adminProductionAs").value);
+    const trueQuantity = Number($("adminProductionTrue").value);
+    const fuelRateText = $("adminProductionFuelRate").value;
+    const fuelRate = fuelRateText === "" ? null : Number(fuelRateText);
+    if (!Number.isFinite(asPer) || asPer < 0 || !Number.isFinite(trueQuantity) || trueQuantity < 0) {
+      throw Error("Production quantities must be non-negative numbers.");
+    }
+    if (fuelRate !== null && (!Number.isFinite(fuelRate) || fuelRate < 0)) {
+      throw Error("Fuel rate must be a non-negative number.");
+    }
+
+    const isEditing = adminEditingProductionId !== null;
+    const payload = {
+      as_per_qty: asPer,
+      true_qty: trueQuantity,
+      fuel_rate: fuelRate,
+      remarks: $("adminProductionRemarks").value.trim() || null,
+    };
+    if (isEditing) {
+      const reason = $("adminProductionReason").value.trim();
+      if (!reason) throw Error("Enter a correction reason.");
+      const oldRecord = adminProductionRecords.find(
+        (record) => record.id === adminEditingProductionId,
+      );
+      if (!oldRecord) throw Error("Production record not found for this shift.");
+      if (!confirm(
+        `Correct production record #${oldRecord.id}?\n` +
+        `As-per: ${oldRecord.as_per_qty} → ${asPer}\n` +
+        `True: ${oldRecord.true_qty} → ${trueQuantity}\n` +
+        `Fuel rate: ${oldRecord.fuel_rate ?? "—"} → ${fuelRate ?? "—"}\n` +
+        `Remarks: ${oldRecord.remarks || "—"} → ${$("adminProductionRemarks").value.trim() || "—"}\n\n` +
+        `Reason: ${reason}`,
+      )) return;
+      payload.reason = reason;
+      await api(`/api/production/admin/${adminEditingProductionId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      const vessel = vessels.find((item) => Number(item.id) === Number(adminSelectedShift.vessel_id));
+      if (!vessel) throw Error("Shift vessel not found.");
+      await api("/api/production/admin", {
+        method: "POST",
+        body: JSON.stringify({
+          ...payload,
+          project_id: vessel.project_id,
+          vessel_id: adminSelectedShift.vessel_id,
+          shift_id: adminSelectedShift.id,
+          production_date: adminSelectedShift.shift_date,
+        }),
+      });
+    }
+    const shiftId = adminSelectedShift.id;
+    await viewAdminShift(shiftId, true);
+    message(isEditing ? "Production record corrected." : "Production record added.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function deleteAdminProduction(productionId) {
+  try {
+    if (me.role !== "ADMIN") throw Error("Only an administrator can delete production records.");
+    const record = adminProductionRecords.find((item) => item.id === productionId);
+    if (!record) throw Error("Production record not found for this shift.");
+    const reason = prompt(`Correction reason for deleting production record #${record.id}:`);
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+    if (!confirm(`Delete production record #${record.id} (${record.production_date})?\n\nReason: ${reason.trim()}`)) return;
+    await api(`/api/production/admin/${record.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Production record deleted.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function correctAdminReceipt(transactionId) {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Receipts can only be corrected by an administrator on an OPEN shift.");
+    }
+    const transaction = adminFuelTransactions.find((item) => item.id === transactionId);
+    if (
+      !transaction ||
+      transaction.transaction_type !== "RECEIPT" ||
+      transaction.reference_type != null ||
+      transaction.reference_id != null
+    ) {
+      throw Error("Only a standalone receipt for the selected shift can be corrected.");
+    }
+
+    const quantityText = prompt("Corrected receipt quantity (L):", transaction.quantity);
+    if (quantityText === null) return;
+    const quantity = Number(quantityText);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw Error("Receipt quantity must be greater than zero.");
+    }
+    const sourceVesselText = prompt(
+      "Source vessel ID (leave blank for a manual source):",
+      transaction.source_vessel_id ?? "",
+    );
+    if (sourceVesselText === null) return;
+    const sourceVesselId = sourceVesselText.trim() === "" ? null : Number(sourceVesselText);
+    if (sourceVesselId !== null && (!Number.isInteger(sourceVesselId) || sourceVesselId <= 0)) {
+      throw Error("Source vessel ID must be a positive integer.");
+    }
+    const fuelSource = prompt("Fuel source name:", transaction.fuel_source || "");
+    if (fuelSource === null) return;
+    const remarks = prompt("Receipt remarks:", transaction.remarks || "");
+    if (remarks === null) return;
+    const reason = prompt("Correction reason:");
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+
+    const oldSource = transaction.source_vessel_id
+      ? `Vessel #${transaction.source_vessel_id}`
+      : transaction.fuel_source || "Manual source";
+    const newSource = sourceVesselId
+      ? `Vessel #${sourceVesselId}`
+      : fuelSource.trim() || "Manual source";
+    if (
+      !confirm(
+        `Correct receipt #${transaction.id}?\n` +
+        `Quantity: ${transaction.quantity} L → ${quantity} L\n` +
+        `Source: ${oldSource} → ${newSource}\n` +
+        `Remarks: ${transaction.remarks || "—"} → ${remarks.trim() || "—"}\n\n` +
+        `Reason: ${reason.trim()}`,
+      )
+    ) {
+      return;
+    }
+
+    await api(`/api/fuel/admin/receipts/${transaction.id}/correct`, {
+      method: "POST",
+      body: JSON.stringify({
+        quantity,
+        source_vessel_id: sourceVesselId,
+        fuel_source: fuelSource.trim() || null,
+        remarks: remarks.trim() || null,
+        reason: reason.trim(),
+      }),
+    });
+    await viewAdminShift(adminSelectedShift.id, true);
+    message("Receipt corrected; no later shift balances were changed.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function correctAdminAdjustment(transactionId) {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Adjustments can only be corrected by an administrator on an OPEN shift.");
+    }
+    const transaction = adminFuelTransactions.find((item) => item.id === transactionId);
+    if (!transaction) throw Error("Adjustment transaction not found.");
+    const quantity = prompt("Corrected adjustment quantity:", transaction.quantity);
+    if (quantity === null) return;
+    const parsedQuantity = Number(quantity);
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+      throw Error("Quantity must be greater than zero.");
+    }
+    const direction = prompt("Corrected direction (IN or OUT):", transaction.adjustment_direction || "IN");
+    if (direction === null) return;
+    const normalizedDirection = direction.trim().toUpperCase();
+    if (!["IN", "OUT"].includes(normalizedDirection)) throw Error("Direction must be IN or OUT.");
+    const reason = prompt("Correction reason:");
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+    if (!confirm(`Correct adjustment #${transaction.id}?\n${transaction.adjustment_direction} ${transaction.quantity} L → ${normalizedDirection} ${parsedQuantity} L\n\nReason: ${reason.trim()}`)) return;
+
+    await api(`/api/fuel/admin/adjustments/${transaction.id}/correct`, {
+      method: "POST",
+      body: JSON.stringify({ quantity: parsedQuantity, direction: normalizedDirection, reason: reason.trim() }),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Adjustment corrected using reversal and corrected ledger entries.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function correctAdminTransfer(transferId) {
+  try {
+    if (me.role !== "ADMIN" || adminSelectedShift?.status !== "OPEN") {
+      throw Error("Transfer corrections require an administrator and an OPEN selected shift.");
+    }
+    const transfer = adminTransfers.find((item) => item.id === transferId);
+    if (!transfer) throw Error("Transfer not found for this shift.");
+    const initiatedText = prompt("Corrected initiated quantity (L):", transfer.initiated_quantity);
+    if (initiatedText === null) return;
+    const initiated = Number(initiatedText);
+    if (!Number.isFinite(initiated) || initiated <= 0) throw Error("Initiated quantity must be greater than zero.");
+
+    let received = null;
+    if (transfer.status !== "INITIATED") {
+      const receivedText = prompt("Corrected received quantity (L):", transfer.received_quantity);
+      if (receivedText === null) return;
+      received = Number(receivedText);
+      if (!Number.isFinite(received) || received < 0) throw Error("Received quantity cannot be negative.");
+    }
+    const notes = prompt("Transfer notes:", transfer.notes || "");
+    if (notes === null) return;
+    const reason = prompt("Correction reason:");
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a correction reason.");
+    const oldQuantities = `${transfer.initiated_quantity} / ${transfer.received_quantity ?? "—"}`;
+    const newQuantities = `${initiated} / ${received ?? "—"}`;
+    if (oldQuantities === newQuantities && notes === (transfer.notes || "")) {
+      throw Error("No transfer values changed.");
+    }
+    if (!confirm(
+      `Correct transfer #${transfer.id}?\n` +
+      `Initiated / received: ${oldQuantities} → ${newQuantities}\n` +
+      `Notes: ${transfer.notes || "—"} → ${notes.trim() || "—"}\n\n` +
+      `Reason: ${reason.trim()}`,
+    )) return;
+
+    const payload = { initiated_quantity: initiated, notes, reason: reason.trim() };
+    if (received !== null) payload.received_quantity = received;
+    await api(`/api/transfers/admin/${transfer.id}/correct`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    await viewAdminShift(adminSelectedShift.id);
+    message("Transfer corrected through the existing transfer accounting service.", "success");
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+async function reopenAdminShift() {
+  try {
+    if (me.role !== "ADMIN") {
+      throw Error("Only an administrator can reopen shifts.");
+    }
+    if (!adminSelectedShift || adminSelectedShift.status !== "CLOSED") {
+      throw Error("Only a closed shift can be reopened.");
+    }
+
+    const reason = $("adminShiftReason").value.trim();
+    if (!reason) throw Error("Enter a correction reason.");
+
+    const shift = adminSelectedShift;
+    const vessel = vessels.find((item) => item.id === shift.vessel_id);
+    const label = `${vessel?.name || `Vessel #${shift.vessel_id}`} · ${shift.shift_date} · ${shift.shift_name}`;
+    if (!confirm(`Reopen ${label}?\n\nReason: ${reason}`)) return;
+
+    await api(`/api/fuel/shift/${shift.id}/reopen`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    $("adminShiftReason").value = "";
+    message("Shift reopened. Existing fuel transactions and transfer balances were not changed.", "success");
+    await loadAdminShifts();
+    await viewAdminShift(shift.id, true);
+  } catch (e) {
+    message(e.message, "error");
+  }
+}
+
+
+// ============================================================
 // FORMAT AUDIT DATE
 // ============================================================
 
@@ -5671,8 +6802,36 @@ async function createBackup() {
     message(e.message, "error");
   }
 }
+[
+  "saveAdminEngineEvent",
+  "deleteAdminEngineEvent",
+  "reopenAdminShift",
+  "saveAdminShiftOperationalData",
+  "correctAdminOpeningFuel",
+  "closeAdminShift",
+  "saveAdminProduction",
+  "deleteAdminProduction",
+  "correctAdminReceipt",
+  "correctAdminAdjustment",
+  "correctAdminTransfer",
+  "createAdminSounding",
+  "correctAdminSounding",
+  "deleteAdminSounding",
+  "removeAdminShiftAttachment",
+].forEach((name) => {
+  const original = window[name];
+  if (typeof original !== "function") return;
+  window[name] = (...args) =>
+    runAdminAction(`${name}:${args[0] ?? "selected"}`, () => original(...args));
+});
+
 document.querySelectorAll(".tab-btn").forEach((b) =>
   b.addEventListener("click", async () => {
+    if (b.dataset.page === "adminShifts" && me.role !== "ADMIN") {
+      message("Only an administrator can manage shifts.", "error");
+      return;
+    }
+
     document
       .querySelectorAll(".tabPage")
       .forEach((x) => x.classList.add("hidden"));
@@ -5688,6 +6847,7 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
       if (b.dataset.page === "dashboard") await loadDashboard();
       if (b.dataset.page === "charts") await loadCharts();
       if (b.dataset.page === "users" && me.role === "ADMIN") await loadUsers();
+      if (b.dataset.page === "adminShifts" && me.role === "ADMIN") await loadAdminShifts();
       if (b.dataset.page === "audit" && me.role === "ADMIN") await loadAudit(true);
     } catch (e) {
       message(e.message, "error");

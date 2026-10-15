@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.attachment import Attachment
 from backend.models.shift_attachments import ShiftAttachment
+from backend.services.audit_service import AuditService
 
 
 class ShiftAttachmentService:
@@ -65,3 +66,44 @@ class ShiftAttachmentService:
             }
             for link, attachment in rows
         ]
+
+    @staticmethod
+    def remove_link(
+        db: Session,
+        *,
+        shift_id: int,
+        link_id: int,
+        removed_by_user_id: int,
+        reason: str,
+    ) -> None:
+        link = db.get(ShiftAttachment, link_id)
+        if link is None:
+            raise ValueError("Shift attachment link not found.")
+        if link.shift_id != shift_id:
+            raise ValueError("Attachment link does not belong to the selected shift.")
+
+        reason = reason.strip() if reason else ""
+        if not reason:
+            raise ValueError("Correction reason is required.")
+        if link.attachment_type == "SOUNDING":
+            raise ValueError("Manage sounding attachments through the sounding record.")
+
+        old_values = {
+            "shift_id": link.shift_id,
+            "attachment_id": link.attachment_id,
+            "attachment_type": link.attachment_type,
+        }
+        link_id = link.id
+        db.delete(link)
+        db.flush()
+        AuditService.log(
+            db=db,
+            user_id=removed_by_user_id,
+            action="REMOVE_SHIFT_ATTACHMENT_LINK",
+            entity="shift_attachments",
+            entity_id=link_id,
+            old_values=old_values,
+            new_values=None,
+            reason=reason,
+            details="Shift attachment link removed; shared attachment file was retained.",
+        )

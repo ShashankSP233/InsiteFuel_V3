@@ -40,3 +40,17 @@ class EngineEventResponse(BaseModel):
 
     created_by_user_id: int
     created_at: datetime
+
+
+class EngineEventAdminUpdate(BaseModel):
+    equipment_id: int
+    start_time: datetime
+    stop_time: datetime
+    lph_rate: Decimal = Field(ge=0)
+    consumption: Decimal | None = Field(default=None, gt=0)
+    remarks: str | None = Field(default=None, max_length=500)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class EngineEventDeleteRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)

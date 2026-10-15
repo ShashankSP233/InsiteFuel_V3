@@ -501,6 +501,7 @@ class TransferService:
         received_quantity: Decimal | None = None,
         manager_remark: str | None = None,
         notes: str | None = None,
+        correction_reason: str | None = None,
     ):
         transfer = db.get(FuelTransfer, transfer_id)
 
@@ -627,7 +628,9 @@ class TransferService:
                 "notes": transfer.notes,
             },
             reason=(
-                manager_remark.strip()
+                correction_reason.strip()
+                if correction_reason and correction_reason.strip()
+                else manager_remark.strip()
                 if manager_remark and manager_remark.strip()
                 else "Pre-approval transfer correction."
             ),
@@ -685,6 +688,7 @@ class TransferService:
         received_quantity: Decimal | None = None,
         manager_remark: str | None = None,
         notes: str | None = None,
+        correction_reason: str | None = None,
     ):
         transfer = db.get(FuelTransfer, transfer_id)
 
@@ -766,6 +770,18 @@ class TransferService:
         if to_shift.vessel_id != transfer.to_vessel_id:
             raise ValueError(
                 "Destination shift does not belong to destination vessel."
+            )
+
+        if (
+            new_initiated != current_initiated
+            or new_received != current_received
+        ) and (
+            FuelService.has_later_shift(db, from_shift)
+            or FuelService.has_later_shift(db, to_shift)
+        ):
+            raise ValueError(
+                "This correction would change fuel available to subsequent shifts; "
+                "downstream reconciliation is required first."
             )
 
         old_source_transaction = (
@@ -984,7 +1000,9 @@ class TransferService:
                 "notes": transfer.notes,
             },
             reason=(
-                manager_remark.strip()
+                correction_reason.strip()
+                if correction_reason and correction_reason.strip()
+                else manager_remark.strip()
                 if manager_remark and manager_remark.strip()
                 else "Approved transfer correction."
             ),
