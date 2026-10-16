@@ -85,7 +85,10 @@ function litres(value) {
     return "—";
   }
 
-  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
 }
 
 function formatDateTime(value) {
@@ -5464,13 +5467,13 @@ async function correctAdminOpeningFuel() {
     }
     if (!reason) throw Error("Enter a correction reason.");
     const shift = adminSelectedShift;
-    if (!confirm(`Correct opening fuel for Shift #${shift.id}?\n${shift.opening_fuel} L → ${openingFuel} L\n\nReason: ${reason}`)) return;
+    if (!confirm(`Correct opening fuel for Shift #${shift.id}?\n${shift.opening_fuel} L → ${openingFuel} L\n\nOpening and closing balances for every later shift will be recalculated. Recorded transactions will remain unchanged. The correction will be rejected if any closing balance becomes negative.\n\nReason: ${reason}`)) return;
     await api(`/api/fuel/admin/shift/${shift.id}/opening`, {
       method: "PATCH",
       body: JSON.stringify({ opening_fuel: openingFuel, reason }),
     });
     await viewAdminShift(shift.id, true);
-    message("Opening fuel corrected; downstream shifts were not changed.", "success");
+    message("Opening fuel corrected and downstream shift balances reconciled.", "success");
   } catch (e) {
     message(e.message, "error");
   }
@@ -6825,6 +6828,96 @@ async function createBackup() {
     runAdminAction(`${name}:${args[0] ?? "selected"}`, () => original(...args));
 });
 
+let selectedIotPayload = null;
+let iotPayloadOffset = 0;
+const IOT_PAYLOAD_PAGE_SIZE = 100;
+
+async function loadIotPayloads() {
+  const status = $("iotStatusFilter")?.value || "";
+  await api("/api/iot/payloads/process-ready", { method: "POST" });
+  const rows = await api(`/api/iot/payloads?limit=${IOT_PAYLOAD_PAGE_SIZE}&offset=${iotPayloadOffset}${status ? `&status=${encodeURIComponent(status)}` : ""}`);
+  $("iotPayloadList").innerHTML = `<table><thead><tr><th>ID</th><th>Received</th><th>External vessel</th><th>Window</th><th>Status</th><th>Issues</th><th></th></tr></thead><tbody>${rows.length ? rows.map((row) => `<tr>
+    <td>${row.id}</td><td>${esc(formatDateTime(row.received_at))}</td><td>${esc(row.external_vessel_id || "—")}</td>
+    <td>${esc(row.window_start ? `${formatDateTime(row.window_start)} – ${formatDateTime(row.window_end)}` : "—")}</td>
+    <td>${esc(row.status)}</td><td>${esc((row.errors || []).join("; ") || (row.warnings || []).join("; ") || "—")}</td>
+    <td><button class="btn btn-ghost" onclick="openIotPayload(${row.id})">Inspect</button></td></tr>`).join("") : `<tr><td colspan="7" class="muted">No payloads found.</td></tr>`}</tbody></table>`;
+  $("iotPayloadPagination").innerHTML = `${iotPayloadOffset ? '<button class="btn btn-ghost" onclick="changeIotPayloadPage(-1)">Previous</button>' : ""}<span class="muted">Showing ${rows.length ? iotPayloadOffset + 1 : 0}–${iotPayloadOffset + rows.length}</span>${rows.length === IOT_PAYLOAD_PAGE_SIZE ? '<button class="btn btn-ghost" onclick="changeIotPayloadPage(1)">Next</button>' : ""}`;
+}
+
+function changeIotPayloadPage(direction) {
+  iotPayloadOffset = Math.max(0, iotPayloadOffset + direction * IOT_PAYLOAD_PAGE_SIZE);
+  loadIotPayloads().catch((error) => message(error.message, "error"));
+}
+
+async function openIotPayload(id) {
+  const [payload, options] = await Promise.all([
+    api(`/api/iot/payloads/${id}`), api("/api/iot/mapping-options"),
+  ]);
+  selectedIotPayload = payload;
+  const names = [...new Set([
+    ...(payload.raw_payload?.engineRunDetails || []).map((x) => x?.engine),
+    ...(payload.raw_payload?.fuelStock || []).map((x) => x?.engine),
+  ].filter((name) => typeof name === "string" && name.trim()).map((name) => name.trim()))];
+  const currentVessel = options.vessels.find((v) => v.iot_vessel_id === payload.external_vessel_id);
+  const canMap = ["AWAITING_MAPPING", "REJECTED"].includes(payload.status);
+  $("iotPayloadDetail").innerHTML = `<div class="card mt8"><div class="section-head"><span class="dot"></span>Payload #${payload.id} · ${esc(payload.status)}</div>
+    <p><strong>Received:</strong> ${esc(formatDateTime(payload.received_at))} · <strong>Internal vessel:</strong> ${esc(payload.vessel_id ?? "Not mapped")}</p>
+    ${payload.errors?.length ? `<div class="note note-err">${payload.errors.map(esc).join("<br>")}</div>` : ""}
+    ${payload.warnings?.length ? `<div class="note note-warn">${payload.warnings.map(esc).join("<br>")}</div>` : ""}
+    ${payload.status === "READY" ? `<div class="flex mt8"><button class="btn btn-primary" onclick="applyReadyIotPayload(${payload.id})">Apply payload</button></div>` : ""}
+    ${canMap ? `<div class="grid mt8"><div><label for="iotMapVessel">Map external vessel ${esc(payload.external_vessel_id || "")}</label><select id="iotMapVessel"><option value="">Select vessel</option>${options.vessels.map((v) => `<option value="${v.id}" ${currentVessel?.id === v.id ? "selected" : ""}>${esc(v.name)}${v.iot_vessel_id ? ` · ${esc(v.iot_vessel_id)}` : ""}</option>`).join("")}</select></div></div>
+      <div id="iotEngineMappings" class="grid mt8">${names.map((name, i) => `<div><label for="iotEngineMap${i}">Vendor engine: ${esc(name)}</label><select id="iotEngineMap${i}" data-engine="${esc(name)}"><option value="">Select equipment</option></select></div>`).join("")}</div>
+      <div class="flex mt8"><button class="btn btn-primary" onclick="saveIotPayloadMapping()">Save mapping and apply</button></div>` : ""}
+    <details class="mt8"><summary>Raw JSON</summary><pre class="iot-raw-json">${esc(JSON.stringify(payload.raw_payload, null, 2))}</pre></details>
+    ${payload.result ? `<details class="mt8"><summary>Processing result</summary><pre class="iot-raw-json">${esc(JSON.stringify(payload.result, null, 2))}</pre></details>` : ""}
+    </div>`;
+  if (canMap) {
+    const fill = () => {
+      const vesselId = Number($("iotMapVessel").value);
+      const choices = options.equipment.filter((e) => e.vessel_id === vesselId);
+      document.querySelectorAll("#iotEngineMappings select").forEach((sel) => {
+        const current = choices.find((e) => e.iot_engine_name?.toLowerCase() === sel.dataset.engine.toLowerCase());
+        sel.innerHTML = `<option value="">Select equipment</option>${choices.map((e) => `<option value="${e.id}" ${current?.id === e.id ? "selected" : ""}>${esc(e.name)}${e.iot_engine_name ? ` · ${esc(e.iot_engine_name)}` : ""}</option>`).join("")}`;
+      });
+    };
+    $("iotMapVessel").addEventListener("change", fill);
+    fill();
+  }
+}
+
+async function applyReadyIotPayload(id) {
+  try {
+    const outcome = await api(`/api/iot/payloads/${id}/reprocess`, { method: "POST" });
+    message(outcome.status === "PROCESSED" ? "Payload applied to its reporting-date shift." : `Payload status: ${outcome.status}.`, outcome.status === "PROCESSED" ? "success" : "warn");
+    await loadIotPayloads();
+    await openIotPayload(id);
+  } catch (error) { message(error.message, "error"); }
+}
+
+async function saveIotPayloadMapping() {
+  try {
+    const vesselId = Number($("iotMapVessel").value);
+    if (!vesselId) throw Error("Select the internal vessel.");
+    const vendorId = String(selectedIotPayload.external_vessel_id || "").trim();
+    if (!vendorId) throw Error("This payload has no valid external vessel ID to map.");
+    const engineSelects = [...document.querySelectorAll("#iotEngineMappings select")];
+    if (engineSelects.some((item) => !item.value)) throw Error("Map each vendor engine name to existing equipment before applying.");
+    await api(`/api/iot/vessels/${vesselId}/mapping`, { method: "PUT", body: JSON.stringify({ iot_vessel_id: vendorId }) });
+    for (const item of engineSelects) {
+      await api(`/api/iot/equipment/${Number(item.value)}/mapping`, { method: "PUT", body: JSON.stringify({ iot_engine_name: item.dataset.engine }) });
+    }
+    const result = await api(`/api/iot/payloads/${selectedIotPayload.id}`);
+    message(result.status === "PROCESSED" ? "Mappings saved and queued payloads were applied in reporting-window order." : `Mappings saved. Payload status: ${result.status}.`, result.status === "PROCESSED" ? "success" : "warn");
+    await loadIotPayloads();
+    await openIotPayload(selectedIotPayload.id);
+  } catch (error) { message(error.message, "error"); }
+}
+
+$("iotStatusFilter")?.addEventListener("change", () => {
+  iotPayloadOffset = 0;
+  loadIotPayloads().catch((error) => message(error.message, "error"));
+});
+
 document.querySelectorAll(".tab-btn").forEach((b) =>
   b.addEventListener("click", async () => {
     if (b.dataset.page === "adminShifts" && me.role !== "ADMIN") {
@@ -6849,6 +6942,7 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
       if (b.dataset.page === "users" && me.role === "ADMIN") await loadUsers();
       if (b.dataset.page === "adminShifts" && me.role === "ADMIN") await loadAdminShifts();
       if (b.dataset.page === "audit" && me.role === "ADMIN") await loadAudit(true);
+      if (b.dataset.page === "iotInbox" && me.role === "ADMIN") await loadIotPayloads();
     } catch (e) {
       message(e.message, "error");
     }

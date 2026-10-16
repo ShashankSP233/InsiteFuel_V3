@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -25,6 +27,10 @@ from backend.services.bootstrap_service  import BootstrapService
 from backend.config import settings
 from backend.routes.shift_attachments import router as shift_attachments_router
 from backend.routes.site import router as site_router
+from backend.routes.iot import router as iot_router
+from backend.services.iot_service import IotService
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="InsiteFuel V3",
@@ -53,6 +59,39 @@ def bootstrap_database():
 
     finally:
         db.close()
+
+def _run_iot_auto_close() -> None:
+    db = SessionLocal()
+    try:
+        outcome = IotService.close_due_shifts(db)
+        if outcome["closed"]:
+            logger.info("IoT auto-close closed shifts: %s", outcome["closed"])
+    finally:
+        db.close()
+
+
+async def _iot_auto_close_loop() -> None:
+    """Closes IoT shifts 11 hours (configurable) after their data arrived."""
+    interval = max(30, settings.iot_auto_close_check_seconds)
+    while True:
+        try:
+            await asyncio.to_thread(_run_iot_auto_close)
+        except Exception:  # noqa: BLE001 - the sweeper must keep running
+            logger.exception("IoT auto-close sweep failed")
+        await asyncio.sleep(interval)
+
+
+@app.on_event("startup")
+async def start_iot_auto_close():
+    app.state.iot_auto_close_task = asyncio.create_task(_iot_auto_close_loop())
+
+
+@app.on_event("shutdown")
+async def stop_iot_auto_close():
+    task = getattr(app.state, "iot_auto_close_task", None)
+    if task is not None:
+        task.cancel()
+
 
 app.include_router(auth_router)
 
@@ -87,6 +126,8 @@ app.include_router(export.router)
 app.include_router(backup_router)
 
 app.include_router(shift_attachments_router)
+
+app.include_router(iot_router)
 
 app.mount("/ui", StaticFiles(directory=frontend_directory, html=True), name="ui")
 

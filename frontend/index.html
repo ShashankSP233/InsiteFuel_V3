@@ -80,6 +80,10 @@
         <button class="tab-btn admin-only" data-page="audit">
           Audit Log
         </button>
+
+        <button class="tab-btn admin-only" data-page="iotInbox">
+          IoT Inbox
+        </button>
       </div>
 
       <main class="wrap">
@@ -1593,10 +1597,27 @@
 
         </section>
 
+        <section id="iotInbox" class="tabPage hidden">
+          <div class="card">
+            <div class="section-head"><span class="dot"></span>IoT Payload Inbox</div>
+            <p class="muted">Review received data, resolve vessel and equipment mappings, then apply supported payloads.</p>
+            <div class="grid">
+              <div><label for="iotStatusFilter">Status</label><select id="iotStatusFilter">
+                <option value="">All statuses</option><option>AWAITING_MAPPING</option><option>READY</option>
+                <option>PROCESSED</option><option>DUPLICATE</option><option value="REJECTED">REJECTED / FAILED</option>
+              </select></div>
+              <div class="flex" style="align-items:end"><button class="btn btn-primary" onclick="loadIotPayloads()">Refresh</button></div>
+            </div>
+            <div id="iotPayloadList" class="table-wrap mt8"></div>
+            <div id="iotPayloadPagination" class="flex mt8"></div>
+          </div>
+          <div id="iotPayloadDetail"></div>
+        </section>
+
       </main>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/ui/js/app.js?v=transfer-date-open-shifts-1"></script>
+    <script src="/ui/js/app.js?v=iot-inbox-1"></script>
   </body>
 </html>

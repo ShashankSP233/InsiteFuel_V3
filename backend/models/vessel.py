@@ -60,6 +60,14 @@ class Vessel(Base):
         default=Decimal("0"),
     )
 
+    # The vessel's identifier in the IoT vendor's system (their "vesselId").
+    iot_vessel_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
     project = relationship(
         "Project",
     )
