@@ -306,6 +306,12 @@ async function loadMaster() {
 
   // Existing application dropdowns
   select("shiftVessel", vessels);
+  if ($("shiftVessel")) {
+    $("shiftVessel").insertAdjacentHTML(
+      "afterbegin",
+      '<option value="" selected>Select a vessel</option>',
+    );
+  }
   select("transferFrom", vessels);
   select("transferTo", vessels);
   populateFuelSources();
@@ -475,6 +481,9 @@ async function updateVesselThreshold() {
 
 async function openShift() {
   try {
+    if (!$("shiftVessel").value) {
+      throw Error("Select a vessel before opening or loading a shift.");
+    }
     const body = {
       vessel_id: n($("shiftVessel").value),
       shift_date: $("shiftDate").value,
@@ -504,6 +513,9 @@ async function openShift() {
 }
 async function establishInitialOpening() {
   try {
+    if (!$("shiftVessel").value) {
+      throw Error("Select a vessel before setting its initial opening fuel.");
+    }
     const rawOpeningFuel = prompt(
       "Initial opening fuel (L):",
       $("openingFuel").value || "0",
@@ -6268,7 +6280,7 @@ async function loadUsers() {
 
     table(
       "usersList",
-      ["ID", "Username", "Name", "Role", "Status", "Actions"],
+      ["ID", "Username", "Name", "Role", "Projects", "Status", "Actions"],
       rows.map((x) => [
         x.id,
 
@@ -6277,6 +6289,13 @@ async function loadUsers() {
         esc(x.full_name),
 
         esc(x.role),
+
+        x.role === "ADMIN"
+          ? "All projects"
+          : esc((x.project_ids || [])
+              .map((id) => projects.find((project) => Number(project.id) === Number(id))?.name)
+              .filter(Boolean)
+              .join(", ") || "None assigned"),
 
         `<button
           class="btn btn-sm ${x.is_active ? "btn-success" : "btn-danger"}"
@@ -6380,6 +6399,13 @@ function addUser() {
     </td>
 
     <td>
+      <select class="master-inline-input" id="newUserProjects" multiple size="3">
+        ${projects.map((project) => '<option value="' + project.id + '">' + esc(project.name) + '</option>').join("")}
+      </select>
+      <small>Ctrl-click to select multiple projects</small>
+    </td>
+
+    <td>
       <select
         class="master-inline-input"
         id="newUserStatus"
@@ -6446,6 +6472,10 @@ async function saveNewUser() {
       .querySelector("#newUserPassword")
       ?.value;
 
+    const projectIds = Array.from(
+      document.querySelector("#newUserProjects")?.selectedOptions || [],
+    ).map((option) => Number(option.value));
+
     const isActive =
       document
         .querySelector("#newUserStatus")
@@ -6482,6 +6512,7 @@ async function saveNewUser() {
         password: password,
         role: role,
         full_name: fullName,
+        project_ids: role === "ADMIN" ? [] : projectIds,
       }),
     });
 
@@ -6580,6 +6611,13 @@ async function editUser(id) {
       </td>
 
       <td>
+        <select class="master-inline-input" id="editUserProjects_${id}" multiple size="3">
+          ${projects.map((project) => '<option value="' + project.id + '"' + ((user.project_ids || []).map(Number).includes(Number(project.id)) ? " selected" : "") + '>' + esc(project.name) + '</option>').join("")}
+        </select>
+        <small>${user.role === "ADMIN" ? "Admins can access all projects." : "Ctrl-click to select multiple projects"}</small>
+      </td>
+
+      <td>
         <select
           class="master-inline-input"
           id="editUserStatus_${id}"
@@ -6650,6 +6688,10 @@ async function saveUser(id) {
         .querySelector(`#editUserStatus_${id}`)
         ?.value === "true";
 
+    const projectIds = Array.from(
+      document.querySelector("#editUserProjects_" + id)?.selectedOptions || [],
+    ).map((option) => Number(option.value));
+
     if (!username) {
       throw Error("Username is required.");
     }
@@ -6685,6 +6727,7 @@ async function saveUser(id) {
         role: role,
         full_name: fullName,
         is_active: isActive,
+        project_ids: role === "ADMIN" ? [] : projectIds,
       }),
     });
 

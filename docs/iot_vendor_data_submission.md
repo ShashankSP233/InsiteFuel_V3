@@ -67,7 +67,7 @@ Use the actual external vessel ID mapped with InsiteFuel. Engine names are `Port
 Each `engineRunDetails` item represents one engine run. `fuelConsumed` is the consumption for that run, in
 **litres**. Use a number for measured consumption and `"N/A"` or `null` when the run has no measured consumption.
 `startTime` and `stopTime` use `HH:MM`; `durationInSeconds` is optional. `fuelStock` values (`rob`, `refill`, and
-`drain`) are in litres. The usual windows are `00:00`–`11:59` for MORNING and `12:00`–`23:59` for EVENING.
+`drain`) are in litres. For each vessel and JSON date, the earliest-starting report is MORNING and the next later-starting report is EVENING. The labels follow start-time order, with no noon cutoff. Send reports chronologically; only two reports per vessel per date are supported.
 
 ## Example command
 

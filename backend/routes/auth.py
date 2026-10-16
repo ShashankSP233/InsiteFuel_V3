@@ -106,4 +106,5 @@ def get_me(
         "role": current_user.role,
         "full_name": current_user.full_name,
         "is_active": current_user.is_active,
+        "project_ids": current_user.project_ids,
     }

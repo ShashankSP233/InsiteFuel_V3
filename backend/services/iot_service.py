@@ -391,7 +391,20 @@ class IotService:
                     f"(payload #{last.id}, {last.window_start:%Y-%m-%d %H:%M}). "
                     "Windows must arrive oldest first."
                 )
-            expected_last_name = "MORNING" if naive_ist(last.window_start).hour < 12 else "EVENING"
+            processed_for_last_date = db.scalars(
+                select(IotPayload)
+                .where(
+                    IotPayload.vessel_id == vessel.id,
+                    IotPayload.status == PROCESSED,
+                    IotPayload.window_end.is_not(None),
+                )
+                .order_by(IotPayload.window_start, IotPayload.id)
+            ).all()
+            same_day = [
+                row for row in processed_for_last_date
+                if naive_ist(row.window_start).date() == naive_ist(last.window_start).date()
+            ]
+            expected_last_name = "MORNING" if same_day and same_day[0].id == last.id else "EVENING"
             if (last.shift_date, last.shift_name) != (last.window_start.date(), expected_last_name):
                 raise IotRejection(
                     f"Previously processed payload #{last.id} was applied to "
@@ -407,11 +420,28 @@ class IotService:
                 )
 
         # -- target the shift represented by this reporting window --------------
-        # Vendor windows are local reporting periods: 00:00–11:59 = MORNING,
-        # 12:00–23:59 = EVENING. The normal service still enforces that earlier
-        # shifts are closed and supplies the opening balance from the prior shift.
+        # For each vessel and reporting date, the earliest window is MORNING
+        # and the next later window is EVENING, independent of clock time.
         shift_date = parsed.window_start.date()
-        shift_name = "MORNING" if parsed.window_start.hour < 12 else "EVENING"
+        processed_for_date = db.scalars(
+            select(IotPayload)
+            .where(
+                IotPayload.vessel_id == vessel.id,
+                IotPayload.status == PROCESSED,
+                IotPayload.window_end.is_not(None),
+            )
+            .order_by(IotPayload.window_start, IotPayload.id)
+        ).all()
+        same_day = [
+            row for row in processed_for_date
+            if naive_ist(row.window_start).date() == shift_date
+        ]
+        if len(same_day) >= 2:
+            raise IotRejection(
+                f"Two reporting windows have already been applied for {shift_date}. "
+                "Only one MORNING and one EVENING window are supported per vessel per date."
+            )
+        shift_name = "MORNING" if not same_day else "EVENING"
         IotService._close_superseded_iot_shifts(db, vessel, shift_date, shift_name, user)
 
         target_shift = db.scalar(

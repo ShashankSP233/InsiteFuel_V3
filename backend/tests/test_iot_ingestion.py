@@ -261,13 +261,21 @@ class IotIngestionTest(unittest.TestCase):
         self.assertEqual(outcome.status, REJECTED)
         self.assertTrue(any("oldest first" in e for e in outcome.errors))
 
-    def test_shift_uses_window_date_and_time_of_day(self):
-        # Morning and evening windows are assigned to their own reporting date.
-        a = IotService.ingest(self.db, payload(start="2026-10-05 06:00", end="2026-10-05 17:59", runs=[], stock=[]))
-        b = IotService.ingest(self.db, payload(start="2026-10-05 18:00", end="2026-10-06 05:59", runs=[], stock=[]))
+    def test_shift_uses_window_date_and_sequence_not_clock_cutoff(self):
+        # Both windows start after noon; their order still determines the shift.
+        a = IotService.ingest(self.db, payload(start="2026-10-05 12:10", end="2026-10-05 23:59", runs=[], stock=[]))
+        b = IotService.ingest(self.db, payload(start="2026-10-05 23:50", end="2026-10-06 11:59", runs=[], stock=[]))
         c = IotService.ingest(self.db, payload(start="2026-10-06 06:00", end="2026-10-06 17:59", runs=[], stock=[]))
         names = [(self.db.get(Shift, o.shift_id).shift_date.isoformat(), self.db.get(Shift, o.shift_id).shift_name) for o in (a, b, c)]
         self.assertEqual(names, [("2026-10-05", "MORNING"), ("2026-10-05", "EVENING"), ("2026-10-06", "MORNING")])
+        self.assertEqual([o.status for o in (a, b, c)], [PROCESSED] * 3)
+
+    def test_third_window_for_same_date_is_rejected(self):
+        IotService.ingest(self.db, payload(start="2026-10-05 06:00", end="2026-10-05 11:59", runs=[], stock=[]))
+        IotService.ingest(self.db, payload(start="2026-10-05 12:00", end="2026-10-05 17:59", runs=[], stock=[]))
+        third = IotService.ingest(self.db, payload(start="2026-10-05 18:00", end="2026-10-05 23:59", runs=[], stock=[]))
+        self.assertEqual(third.status, REJECTED)
+        self.assertTrue(any("Two reporting windows" in e for e in third.errors))
 
     def test_morning_window_uses_its_date_even_when_latest_shift_is_prior_morning(self):
         prior_evening = self.db.scalar(select(Shift).where(

@@ -5,8 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.database import SessionLocal
-from backend.dependencies import get_current_user, require_roles
+from backend.dependencies import db_session, get_current_user, require_roles
 from backend.models.fuel import AdjustmentDirection, FuelTransaction
 from backend.models.user import User, UserRole
 from backend.schemas.fuel import (
@@ -33,14 +32,6 @@ router = APIRouter(
     prefix="/api/fuel",
     tags=["Fuel"],
 )
-
-
-def db_session():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.get(

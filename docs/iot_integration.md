@@ -27,8 +27,10 @@ Array items are processed oldest window first, each in its own transaction.
 2. Identical payload already processed -> a stored `DUPLICATE` inbox entry; no ledger or shift changes. Same
    vessel + window with different content -> rejected (correct it with the admin editing tools, do not re-send).
 3. `vesselId` -> `vessels.iot_vessel_id`; engine name -> `equipment.iot_engine_name`.
-4. The reporting window determines the shift: a window starting from 00:00 through 11:59 maps to MORNING on its
-   start date; one starting from 12:00 through 23:59 maps to EVENING on its start date. Times are read as IST.
+4. The JSON start date determines the shift date. For each vessel and date, the earliest-starting reporting
+   window is MORNING and the next later-starting window is EVENING. This is based on start-time order, with no
+   noon cutoff. Send windows chronologically; a third window for the same vessel and date is rejected. Times are
+   read as IST.
    Normal shift-chain rules still apply: all earlier shifts must be closed and the latest earlier shift supplies
    opening fuel. Windows must arrive oldest first; an older or repeated-but-different window is rejected, a large gap only warns.
 5. Shift created through `FuelService.get_or_create_shift` (normal chain rules, opening fuel from the previous
