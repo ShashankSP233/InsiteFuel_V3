@@ -9,6 +9,7 @@ class UserCreate(BaseModel):
         default=None,
         max_length=150,
     )
+    project_ids: list[int] = Field(default_factory=list)
 
 
 class UserUpdate(BaseModel):
@@ -23,6 +24,7 @@ class UserUpdate(BaseModel):
         max_length=150,
     )
     is_active: bool | None = None
+    project_ids: list[int] | None = None
 
 
 class PasswordReset(BaseModel):
@@ -40,3 +42,4 @@ class UserResponse(BaseModel):
     role: str
     full_name: str | None
     is_active: bool
+    project_ids: list[int] = Field(default_factory=list)

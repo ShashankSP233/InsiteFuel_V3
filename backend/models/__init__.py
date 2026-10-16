@@ -14,6 +14,7 @@ from backend.models.production import ProductionRecord
 from backend.models.shift_attachments import ShiftAttachment
 from backend.models.site import Site
 from backend.models.transfer_attachment import TransferAttachment
+from backend.models.iot import IotPayload
 
 __all__ = [
     "User",
@@ -34,4 +35,5 @@ __all__ = [
     "ShiftAttachment",
     "Site",
     "TransferAttachment",
+    "IotPayload",
 ]

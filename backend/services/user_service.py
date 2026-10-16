@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.models.user import User, UserRole
+from backend.models.project import Project
 from backend.services.auth_service import hash_password
 from backend.services.audit_service import AuditService
 
@@ -26,6 +27,7 @@ def create_user(
     password: str,
     role: str,
     full_name: str | None = None,
+    project_ids: list[int] | None = None,
     created_by_user_id: int | None = None,
 ) -> User:
     username = username.strip()
@@ -62,6 +64,8 @@ def create_user(
         full_name=full_name,
         is_active=True,
     )
+    if role != UserRole.ADMIN.value:
+        user.projects = _get_projects(db, project_ids or [])
 
     db.add(user)
     db.flush()
@@ -77,6 +81,7 @@ def create_user(
             "role": user.role,
             "full_name": user.full_name,
             "is_active": user.is_active,
+            "project_ids": user.project_ids,
         },
         details="User account created.",
     )
@@ -90,6 +95,14 @@ def get_user_by_id(
     return db.get(User, user_id)
 
 
+def _get_projects(db: Session, project_ids: list[int]):
+    unique_ids = set(project_ids)
+    projects = db.scalars(select(Project).where(Project.id.in_(unique_ids))).all() if unique_ids else []
+    if len(projects) != len(unique_ids):
+        raise ValueError("One or more selected projects do not exist.")
+    return projects
+
+
 def update_user(
     db: Session,
     user: User,
@@ -98,6 +111,7 @@ def update_user(
     role: str | None = None,
     full_name: str | None = None,
     is_active: bool | None = None,
+    project_ids: list[int] | None = None,
     updated_by_user_id: int | None = None,
 ) -> User:
     old_values = {
@@ -105,6 +119,7 @@ def update_user(
         "role": user.role,
         "full_name": user.full_name,
         "is_active": user.is_active,
+        "project_ids": user.project_ids,
     }
     if username is not None:
         username = username.strip()
@@ -150,12 +165,18 @@ def update_user(
     if is_active is not None:
         user.is_active = is_active
 
+    if user.role == UserRole.ADMIN.value:
+        user.projects = []
+    elif project_ids is not None:
+        user.projects = _get_projects(db, project_ids)
+
     db.flush()
     new_values = {
-    "username": user.username,
-    "role": user.role,
-    "full_name": user.full_name,
-    "is_active": user.is_active,
+        "username": user.username,
+        "role": user.role,
+        "full_name": user.full_name,
+        "is_active": user.is_active,
+        "project_ids": user.project_ids,
     }
 
     AuditService.log(

@@ -73,3 +73,26 @@ class Shift(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    # Where the shift came from: "MANUAL" (created by a user) or "IOT"
+    # (created from vendor data by the IoT ingestion API).
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="MANUAL",
+        server_default="MANUAL",
+    )
+
+    # IoT shifts only: when the scheduler should close the shift if nobody
+    # has closed it manually first.  Cleared when the shift is reopened.
+    auto_close_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
+    # "MANUAL" or "AUTO_IOT"; NULL while the shift is open.
+    close_source: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )

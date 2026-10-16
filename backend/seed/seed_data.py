@@ -451,6 +451,9 @@ def seed():
         print("Loading demo master data...")
 
         vessels, equipment = get_master_data(db)
+        demo_projects = list({vessel.project for vessel in vessels})
+        for demo_user in (manager, operator1, operator2):
+            demo_user.projects = demo_projects
 
         start_date = date.today() - timedelta(days=4)
         days = 5

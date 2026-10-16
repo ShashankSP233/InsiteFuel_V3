@@ -46,6 +46,7 @@ def create_new_user(
             password=payload.password,
             role=payload.role,
             full_name=payload.full_name,
+            project_ids=payload.project_ids,
             created_by_user_id=current_user.id,
         )
 
@@ -138,6 +139,7 @@ def update_existing_user(
             role=payload.role,
             full_name=payload.full_name,
             is_active=payload.is_active,
+            project_ids=payload.project_ids,
             updated_by_user_id=current_user.id,
         )
 

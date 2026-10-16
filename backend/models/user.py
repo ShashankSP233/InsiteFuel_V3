@@ -1,11 +1,19 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, String, Table
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
 from backend.utils.time import now_ist
+
+
+user_projects = Table(
+    "user_projects",
+    Base.metadata,
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("project_id", ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class UserRole(str, Enum):
@@ -66,3 +74,9 @@ class User(Base):
         default=now_ist,
         onupdate=now_ist,
     )
+
+    projects = relationship("Project", secondary=user_projects, lazy="selectin")
+
+    @property
+    def project_ids(self) -> list[int]:
+        return sorted(project.id for project in self.projects)
