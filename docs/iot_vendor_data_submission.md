@@ -7,7 +7,7 @@ Use this guide to submit vessel shift data to InsiteFuel V3.
 Send an HTTP `POST` request to:
 
 ```text
-http://192.168.1.190:8010/api/iot/shift-data
+https://insitefuel.dhartidredging.com/api/iot/shift-data
 ```
 
 This is the endpoint for the current local test server. The InsiteFuel page at `/ui/` is for people; the IoT
