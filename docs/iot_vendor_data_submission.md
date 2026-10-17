@@ -74,7 +74,7 @@ Each `engineRunDetails` item represents one engine run. `fuelConsumed` is the co
 Replace the API key and JSON file path with the values for your integration:
 
 ```bash
-curl -X POST "http://192.168.1.190:8010/api/iot/shift-data" \
+curl -X POST "https://insitefuel.dhartidredging.com/api/iot/shift-data" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: <API key provided by InsiteFuel>" \
   --data-binary @shift-data.json
