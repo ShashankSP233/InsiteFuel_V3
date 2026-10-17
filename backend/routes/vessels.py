@@ -38,8 +38,11 @@ def list_vessels(
         get_current_user
     ),
 ):
+    query = select(Vessel)
+    if current_user.role != UserRole.ADMIN.value:
+        query = query.where(Vessel.project_id.in_(current_user.project_ids))
     return db.scalars(
-        select(Vessel).order_by(
+        query.order_by(
             Vessel.id
         )
     ).all()

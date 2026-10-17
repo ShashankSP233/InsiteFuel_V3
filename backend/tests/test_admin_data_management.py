@@ -446,7 +446,7 @@ class AdminDataManagementTests(unittest.TestCase):
             )
         self.assertEqual(blocked_db.added, [])
 
-    def test_opening_correction_is_local_audited_and_rejects_successors(self):
+    def test_opening_correction_is_audited_when_no_successors_exist(self):
         shift = SimpleNamespace(
             id=4,
             vessel_id=3,
@@ -481,32 +481,78 @@ class AdminDataManagementTests(unittest.TestCase):
         self.assertEqual(audit.new_values["opening_fuel"], "105")
         self.assertEqual(audit.reason, "Opening reading correction")
 
-        blocked_shift = SimpleNamespace(**shift.__dict__)
-        blocked_shift.opening_fuel = Decimal("105")
-        later_shift = SimpleNamespace(
-            id=5,
-            vessel_id=3,
-            status="OPEN",
-            shift_date=date(2026, 10, 14),
-            opening_fuel=Decimal("95"),
+    def test_admin_opening_correction_reconciles_all_later_shifts(self):
+        first = SimpleNamespace(
+            id=4, vessel_id=3, status="OPEN", shift_date=date(2026, 10, 13),
+            shift_name="MORNING", opening_fuel=Decimal("100"),
             calculated_closing_fuel=Decimal("90"),
         )
-        blocked_db = FakeSession(records={(Shift, 4): blocked_shift})
+        second = SimpleNamespace(
+            id=5, vessel_id=3, status="CLOSED", shift_date=date(2026, 10, 13),
+            shift_name="EVENING", opening_fuel=Decimal("90"),
+            calculated_closing_fuel=Decimal("80"),
+        )
+        third = SimpleNamespace(
+            id=6, vessel_id=3, status="OPEN", shift_date=date(2026, 10, 14),
+            shift_name="MORNING", opening_fuel=Decimal("80"),
+            calculated_closing_fuel=Decimal("70"),
+        )
+        db = FakeSession(records={(Shift, item.id): item for item in (first, second, third)})
+
+        def close_from_opening(session, shift_id):
+            current = session.get(Shift, shift_id)
+            return {"closing_fuel": current.opening_fuel - Decimal("10")}
+
         with patch.object(
-            FuelService,
-            "lock_vessel_shifts",
-            return_value=[blocked_shift, later_shift],
+            FuelService, "lock_vessel_shifts", return_value=[third, first, second]
+        ), patch.object(
+            FuelService, "calculate_shift_balance", side_effect=close_from_opening
         ):
-            with self.assertRaisesRegex(ValueError, "later shifts"):
+            FuelService.correct_admin_opening_fuel(
+                db, shift_id=4, new_opening_fuel=Decimal("110"),
+                corrected_by_user_id=1, reason="Correct first reading",
+            )
+
+        self.assertEqual((first.opening_fuel, first.calculated_closing_fuel), (Decimal("110"), Decimal("100")))
+        self.assertEqual((second.opening_fuel, second.calculated_closing_fuel), (Decimal("100"), Decimal("90")))
+        self.assertEqual((third.opening_fuel, third.calculated_closing_fuel), (Decimal("90"), Decimal("80")))
+        audits = [item for item in db.added if isinstance(item, AuditLog)]
+        self.assertEqual(len(audits), 3)
+        self.assertEqual([item.action for item in audits[1:]], [
+            "RECONCILE_DOWNSTREAM_SHIFT_FUEL",
+            "RECONCILE_DOWNSTREAM_SHIFT_FUEL",
+        ])
+
+    def test_admin_opening_correction_rejects_negative_downstream_and_restores_values(self):
+        first = SimpleNamespace(
+            id=4, vessel_id=3, status="OPEN", shift_date=date(2026, 10, 13),
+            shift_name="MORNING", opening_fuel=Decimal("100"),
+            calculated_closing_fuel=Decimal("90"),
+        )
+        later = SimpleNamespace(
+            id=5, vessel_id=3, status="CLOSED", shift_date=date(2026, 10, 13),
+            shift_name="EVENING", opening_fuel=Decimal("90"),
+            calculated_closing_fuel=Decimal("80"),
+        )
+        db = FakeSession(records={(Shift, 4): first, (Shift, 5): later})
+
+        def close_from_opening(session, shift_id):
+            current = session.get(Shift, shift_id)
+            delta = Decimal("10") if shift_id == first.id else Decimal("200")
+            return {"closing_fuel": current.opening_fuel - delta}
+
+        with patch.object(FuelService, "lock_vessel_shifts", return_value=[first, later]), patch.object(
+            FuelService, "calculate_shift_balance", side_effect=close_from_opening
+        ):
+            with self.assertRaisesRegex(ValueError, "Shift #5 closing fuel negative"):
                 FuelService.correct_admin_opening_fuel(
-                    blocked_db,
-                    shift_id=4,
-                    new_opening_fuel=Decimal("106"),
-                    corrected_by_user_id=1,
-                    reason="Correction",
+                    db, shift_id=4, new_opening_fuel=Decimal("110"),
+                    corrected_by_user_id=1, reason="Test negative downstream",
                 )
-        self.assertEqual(blocked_shift.opening_fuel, Decimal("105"))
-        self.assertEqual(blocked_db.added, [])
+
+        self.assertEqual((first.opening_fuel, first.calculated_closing_fuel), (Decimal("100"), Decimal("90")))
+        self.assertEqual((later.opening_fuel, later.calculated_closing_fuel), (Decimal("90"), Decimal("80")))
+        self.assertEqual(db.added, [])
 
     def test_existing_opening_correction_rejects_successors_without_cascade(self):
         shift = SimpleNamespace(

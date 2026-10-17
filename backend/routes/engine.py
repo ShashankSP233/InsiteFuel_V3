@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from backend.database import SessionLocal
-from backend.dependencies import get_current_user, require_roles
+from backend.dependencies import db_session, get_current_user, require_roles
 from backend.models.user import User, UserRole
 from backend.schemas.engine import (
     EngineEventCreate,
@@ -18,14 +17,6 @@ router = APIRouter(
     prefix="/api/engine",
     tags=["Engine"],
 )
-
-
-def db_session():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.post(

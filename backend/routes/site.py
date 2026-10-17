@@ -39,10 +39,14 @@ def list_sites(
         get_current_user
     ),
 ):
-    return get_sites(
-        db,
-        project_id=project_id,
-    )
+    if current_user.role != UserRole.ADMIN.value:
+        allowed = current_user.project_ids
+        if project_id is not None and project_id not in allowed:
+            return []
+        return get_sites(db, project_id=project_id) if project_id is not None else [
+            site for pid in allowed for site in get_sites(db, project_id=pid)
+        ]
+    return get_sites(db, project_id=project_id)
 
 
 @router.get(

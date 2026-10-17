@@ -6,20 +6,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from sqlalchemy.orm import Session
 
-from backend.database import SessionLocal
+from backend.database import get_db
 from backend.models.session import Session as UserSession
 from backend.models.user import User, UserRole
 from backend.services.auth_service import get_session
 
 security = HTTPBearer()
 
-def db_session():
-    db = SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()
+db_session = get_db
 
 
 def get_authenticated_session(
@@ -59,6 +53,15 @@ def get_authenticated_session(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User is inactive or no longer exists.",
         )
+
+    if user.role == UserRole.ADMIN.value:
+        db.info.pop("project_scope_ids", None)
+        db.info.pop("project_scope_user_id", None)
+    else:
+        # Load assignments before enabling the session-wide query filter.
+        assigned_project_ids = list(user.project_ids)
+        db.info["project_scope_user_id"] = user.id
+        db.info["project_scope_ids"] = assigned_project_ids
 
     return user, user_session
 

@@ -35,8 +35,11 @@ def list_projects(
     db: Session = Depends(db_session),
     current_user: User = Depends(get_current_user),
 ):
+    query = select(Project)
+    if current_user.role != UserRole.ADMIN.value:
+        query = query.where(Project.id.in_(current_user.project_ids))
     return db.scalars(
-        select(Project).order_by(Project.id)
+        query.order_by(Project.id)
     ).all()
 
 
@@ -59,6 +62,9 @@ def get_project(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found.",
         )
+
+    if current_user.role != UserRole.ADMIN.value and project.id not in current_user.project_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
 
     return project
 
@@ -85,6 +91,10 @@ def create_new_project(
             description=payload.description,
             created_by_user_id=current_user.id,
         )
+
+        if current_user.role != UserRole.ADMIN.value:
+            current_user.projects.append(project)
+            db.info["project_scope_ids"] = [*current_user.project_ids]
 
         db.commit()
         db.refresh(project)

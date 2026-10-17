@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.database import SessionLocal
+from backend.dependencies import get_db
 from backend.dependencies import require_roles
 from backend.models.audit_log import AuditLog
 from backend.models.user import User, UserRole
@@ -32,14 +32,6 @@ router = APIRouter(
 )
 
 
-def db_session():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 @router.get("", response_model=list[AuditLogResponse])
 def get_audit_logs(
     action: str | None = Query(default=None),
@@ -48,7 +40,7 @@ def get_audit_logs(
     user_id: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    db: Session = Depends(db_session),
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.ADMIN)),
 ):
     query = select(AuditLog)

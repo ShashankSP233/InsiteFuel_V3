@@ -915,7 +915,18 @@ class FuelService:
         shift_id: int,
         closed_by_user_id: int | None = None,
         reason: str | None = None,
+        *,
+        system_close: bool = False,
     ) -> Shift:
+        """
+        Close a shift.
+
+        ``system_close`` is used only by the IoT auto-close.  It waives the
+        two requirements that need a person to enter data the IoT feed cannot
+        supply (a sounding, and advancement / dredging hours for Dredgers).
+        Everything else - non-negative closing fuel, transfer notes - is still
+        enforced, and the waived items are written to the audit log.
+        """
         shift_hint = db.get(Shift, shift_id)
         if shift_hint is None:
             raise ValueError("Shift not found.")
@@ -925,6 +936,8 @@ class FuelService:
 
         if shift.status == "CLOSED":
             return shift
+
+        waived: list[str] = []
 
         if shift.status != "OPEN":
             raise ValueError(
@@ -937,13 +950,17 @@ class FuelService:
         vessel = db.get(Vessel, shift.vessel_id)
         if vessel is not None and vessel.vessel_type == "Dredger":
             if shift.advancement_m is None:
-                raise ValueError(
-                    "Shift cannot be closed: advancement is required for Dredgers."
-                )
+                if not system_close:
+                    raise ValueError(
+                        "Shift cannot be closed: advancement is required for Dredgers."
+                    )
+                waived.append("advancement")
             if shift.dredging_hours is None:
-                raise ValueError(
-                    "Shift cannot be closed: dredging hours are required for Dredgers."
-                )
+                if not system_close:
+                    raise ValueError(
+                        "Shift cannot be closed: dredging hours are required for Dredgers."
+                    )
+                waived.append("dredging_hours")
 
         # ---------------------------------------------------------
         # Phase 4: every shift requires at least one sounding.
@@ -955,9 +972,11 @@ class FuelService:
         ) or 0
 
         if sounding_count < 1:
-            raise ValueError(
-                "Shift cannot be closed without at least one sounding."
-            )
+            if not system_close:
+                raise ValueError(
+                    "Shift cannot be closed without at least one sounding."
+                )
+            waived.append("sounding")
 
         # Calculate the final balance from the ledger.
         FuelService.recalculate_shift(
@@ -1017,6 +1036,7 @@ class FuelService:
 
         shift.status = "CLOSED"
         shift.closed_at = now_ist()
+        shift.close_source = "AUTO_IOT" if system_close else "MANUAL"
 
         db.flush()
 
@@ -1036,6 +1056,8 @@ class FuelService:
             },
             new_values={
                 "status": shift.status,
+                "close_source": shift.close_source,
+                "waived_requirements": waived,
                 "calculated_closing_fuel": (
                     str(shift.calculated_closing_fuel)
                     if shift.calculated_closing_fuel is not None
@@ -1043,7 +1065,12 @@ class FuelService:
                 ),
             },
             reason=reason.strip() if reason else None,
-            details="Shift closed and final fuel balance calculated.",
+            details=(
+                "Shift closed automatically by the IoT integration; "
+                f"requirements waived: {', '.join(waived) or 'none'}."
+                if system_close
+                else "Shift closed and final fuel balance calculated."
+            ),
         )
 
         return shift
@@ -1082,6 +1109,10 @@ class FuelService:
 
         shift.status = "OPEN"
         shift.closed_at = None
+        # Once a person has reopened the shift, the IoT auto-close must not
+        # take it back; it is closed manually again.
+        shift.auto_close_at = None
+        shift.close_source = None
 
         db.flush()
 
@@ -1217,15 +1248,14 @@ class FuelService:
         if not reason:
             raise ValueError("Correction reason is required.")
 
-        has_subsequent_shift = any(
-            FuelService.is_later_shift(candidate, shift)
-            for candidate in vessel_shifts
+        subsequent_shifts = sorted(
+            (
+                candidate
+                for candidate in vessel_shifts
+                if FuelService.is_later_shift(candidate, shift)
+            ),
+            key=FuelService.shift_order_key,
         )
-        if has_subsequent_shift:
-            raise ValueError(
-                "Opening fuel cannot be corrected while later shifts exist; "
-                "downstream reconciliation is required first."
-            )
 
         previous_shift = max(
             (
@@ -1256,13 +1286,54 @@ class FuelService:
         if old_value == proposed:
             raise ValueError("Corrected opening fuel is unchanged.")
 
-        shift.opening_fuel = proposed
-        balance = FuelService.calculate_shift_balance(db, shift.id)
-        if balance["closing_fuel"] < 0:
-            raise ValueError(
-                "Correction would make the shift closing balance negative."
+        affected_shifts = [shift, *subsequent_shifts]
+        old_balances = {
+            candidate.id: (
+                candidate.opening_fuel,
+                candidate.calculated_closing_fuel,
             )
-        shift.calculated_closing_fuel = balance["closing_fuel"]
+            for candidate in affected_shifts
+        }
+        downstream_changes: list[dict[str, str | int | None]] = []
+        try:
+            shift.opening_fuel = proposed
+            balance = FuelService.calculate_shift_balance(db, shift.id)
+            if balance["closing_fuel"] < 0:
+                raise ValueError(
+                    "Correction would make the shift closing balance negative."
+                )
+            shift.calculated_closing_fuel = balance["closing_fuel"]
+
+            previous = shift
+            for later in subsequent_shifts:
+                old_opening, old_closing = old_balances[later.id]
+                later.opening_fuel = previous.calculated_closing_fuel
+                later_balance = FuelService.calculate_shift_balance(db, later.id)
+                if later_balance["closing_fuel"] < 0:
+                    raise ValueError(
+                        "Correction would make downstream Shift "
+                        f"#{later.id} closing fuel negative. No shifts were changed."
+                    )
+                later.calculated_closing_fuel = later_balance["closing_fuel"]
+                downstream_changes.append(
+                    {
+                        "shift_id": later.id,
+                        "old_opening_fuel": str(old_opening),
+                        "new_opening_fuel": str(later.opening_fuel),
+                        "old_closing_fuel": (
+                            str(old_closing) if old_closing is not None else None
+                        ),
+                        "new_closing_fuel": str(later.calculated_closing_fuel),
+                    }
+                )
+                previous = later
+        except Exception:
+            for candidate in affected_shifts:
+                old_opening, old_closing = old_balances[candidate.id]
+                candidate.opening_fuel = old_opening
+                candidate.calculated_closing_fuel = old_closing
+            raise
+
         db.flush()
 
         AuditService.log(
@@ -1282,10 +1353,36 @@ class FuelService:
             new_values={
                 "opening_fuel": str(proposed),
                 "calculated_closing_fuel": str(balance["closing_fuel"]),
+                "downstream_reconciled": downstream_changes,
             },
             reason=reason,
-            details="Opening fuel corrected on the selected shift only; no later shifts existed.",
+            details=(
+                f"Opening fuel corrected; {len(downstream_changes)} later shift(s) "
+                "had opening and calculated closing fuel reconciled."
+            ),
         )
+        for change in downstream_changes:
+            AuditService.log(
+                db=db,
+                user_id=corrected_by_user_id,
+                action="RECONCILE_DOWNSTREAM_SHIFT_FUEL",
+                entity="shifts",
+                entity_id=change["shift_id"],
+                old_values={
+                    "opening_fuel": change["old_opening_fuel"],
+                    "calculated_closing_fuel": change["old_closing_fuel"],
+                },
+                new_values={
+                    "opening_fuel": change["new_opening_fuel"],
+                    "calculated_closing_fuel": change["new_closing_fuel"],
+                    "source_shift_id": shift.id,
+                },
+                reason=reason,
+                details=(
+                    "Opening fuel and calculated closing fuel recalculated after "
+                    "an upstream opening-fuel correction."
+                ),
+            )
         return shift
 
     @staticmethod
