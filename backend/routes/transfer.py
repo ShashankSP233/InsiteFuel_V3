@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import csv
+import io
+from datetime import date, datetime, time, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -6,6 +10,8 @@ from backend.database import get_db
 from backend.dependencies import get_current_user, require_roles
 from backend.models.shift import Shift
 from backend.models.transfer import FuelTransfer, TransferStatus
+from backend.models.vessel import Vessel
+from backend.utils.time import IST
 from backend.models.user import User, UserRole
 from backend.schemas.transfer import (
     AdminTransferCorrection,
@@ -229,6 +235,95 @@ def list_transfers(
     statement = statement.order_by(FuelTransfer.created_at.desc())
 
     return db.scalars(statement).all()
+
+
+def _admin_transfer_rows(
+    db: Session,
+    from_date: date | None,
+    to_date: date | None,
+    transfer_status: str | None,
+    vessel_id: int | None,
+):
+    statement = select(FuelTransfer)
+    if from_date:
+        statement = statement.where(
+            FuelTransfer.transfer_date >= datetime.combine(from_date, time.min, tzinfo=IST)
+        )
+    if to_date:
+        statement = statement.where(
+            FuelTransfer.transfer_date < datetime.combine(to_date + timedelta(days=1), time.min, tzinfo=IST)
+        )
+    if transfer_status:
+        statement = statement.where(FuelTransfer.status == transfer_status)
+    if vessel_id is not None:
+        statement = statement.where(
+            (FuelTransfer.from_vessel_id == vessel_id)
+            | (FuelTransfer.to_vessel_id == vessel_id)
+        )
+    transfers = db.scalars(statement.order_by(FuelTransfer.transfer_date.desc(), FuelTransfer.id.desc())).all()
+    vessel_ids = {value for transfer in transfers for value in (transfer.from_vessel_id, transfer.to_vessel_id)}
+    names = {
+        vessel.id: vessel.name
+        for vessel in db.scalars(select(Vessel).where(Vessel.id.in_(vessel_ids))).all()
+    } if vessel_ids else {}
+    return [
+        {
+            "id": transfer.id,
+            "from_vessel": names.get(transfer.from_vessel_id, str(transfer.from_vessel_id)),
+            "to_vessel": names.get(transfer.to_vessel_id, str(transfer.to_vessel_id)),
+            "transfer_date": transfer.transfer_date.isoformat() if transfer.transfer_date else None,
+            "initiated_quantity": str(transfer.initiated_quantity),
+            "received_quantity": str(transfer.received_quantity) if transfer.received_quantity is not None else None,
+            "loss_quantity": str(transfer.loss_quantity) if transfer.loss_quantity is not None else None,
+            "status": transfer.status.value if hasattr(transfer.status, "value") else transfer.status,
+            "notes": transfer.notes,
+            "manager_remark": transfer.manager_remark,
+        }
+        for transfer in transfers
+    ]
+
+
+@router.get("/admin/report")
+def admin_transfer_report(
+    from_date: date | None = Query(None),
+    to_date: date | None = Query(None),
+    transfer_status: str | None = Query(None, alias="status"),
+    vessel_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=400, detail="From date cannot be later than to date.")
+    return _admin_transfer_rows(db, from_date, to_date, transfer_status, vessel_id)
+
+
+@router.get("/admin/report.csv")
+def export_admin_transfer_report(
+    from_date: date | None = Query(None),
+    to_date: date | None = Query(None),
+    transfer_status: str | None = Query(None, alias="status"),
+    vessel_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=400, detail="From date cannot be later than to date.")
+    rows = _admin_transfer_rows(db, from_date, to_date, transfer_status, vessel_id)
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    headers = ["ID", "From vessel", "To vessel", "Transfer date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark"]
+    writer.writerow(headers)
+    def safe_cell(value):
+        text = "" if value is None else str(value)
+        return f"'{text}" if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
+
+    writer.writerows([[safe_cell(row[key]) for key in ("id", "from_vessel", "to_vessel", "transfer_date", "initiated_quantity", "received_quantity", "loss_quantity", "status", "notes", "manager_remark")] for row in rows])
+    suffix = f"_{from_date}_{to_date}" if from_date and to_date else ""
+    return Response(
+        content="\ufeff" + output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="insitefuel_transfers{suffix}.csv"'},
+    )
 
 @router.post(
     "/{transfer_id}/attachments",

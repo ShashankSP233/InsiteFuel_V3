@@ -440,6 +440,13 @@
 
         <section id="transfers" class="tabPage hidden">
 
+          <div class="subtab-bar" role="tablist" aria-label="Transfers views">
+            <button class="subtab-btn active" data-transfer-view="register">Transfer register</button>
+            <button class="subtab-btn admin-only" data-transfer-view="report">Admin transfer report</button>
+          </div>
+
+          <div id="transferRegisterView">
+
           <div class="card">
             <div class="section-head">
               <span class="dot"></span>
@@ -517,6 +524,31 @@
               id="transferList"
               class="table-wrap"
             ></div>
+          </div>
+
+          </div>
+
+          <div id="transferReportView" class="hidden admin-only">
+            <div class="card">
+              <div class="section-head"><span class="dot"></span>Transfer report</div>
+              <div class="grid">
+                <div><label>From date</label><input id="transferReportFrom" type="date" /></div>
+                <div><label>To date</label><input id="transferReportTo" type="date" /></div>
+                <div><label>Status</label>
+                  <select id="transferReportStatus">
+                    <option value="">All statuses</option>
+                    <option>INITIATED</option><option>RECEIVING_CONFIRMED</option>
+                    <option>MANAGER_REVIEW</option><option>APPROVED</option>
+                    <option>REJECTED</option><option>BALANCES_UPDATED</option>
+                  </select>
+                </div>
+                <div><label>Vessel</label><select id="transferReportVessel"><option value="">All vessels</option></select></div>
+              </div>
+              <button class="btn btn-primary mt8" onclick="loadTransferReport()">Apply filters</button>
+              <button class="btn mt8" onclick="exportTransferReport()">Export CSV</button>
+              <div id="transferReportStatusMessage" class="note"></div>
+              <div id="transferReportList" class="table-wrap mt8"></div>
+            </div>
           </div>
 
         </section>

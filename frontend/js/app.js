@@ -211,6 +211,8 @@ async function init() {
   ["shiftDate", "productionDate", "soundingDate", "dashTo", "transferDate", "adminShiftFrom", "adminShiftTo"].forEach(
     (id) => ($(id).value = today()),
   );
+  $("transferReportFrom").value = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+  $("transferReportTo").value = today();
   if ($("chartFrom")) {
     $("chartFrom").value = new Date(Date.now() - 29 * 864e5)
       .toISOString()
@@ -314,6 +316,8 @@ async function loadMaster() {
   }
   select("transferFrom", vessels);
   select("transferTo", vessels);
+  $("transferReportVessel").innerHTML = '<option value="">All vessels</option>' +
+    vessels.map((vessel) => `<option value="${vessel.id}">${esc(vessel.name)}</option>`).join("");
   populateFuelSources();
   select("productionVessel", vessels);
   select("soundingVessel", vessels);
@@ -572,6 +576,8 @@ async function loadShiftReport() {
 
     const b = r.balance;
     const transactions = r.transactions || [];
+    const engineEvents = await api(`/api/engine/events?shift_id=${activeShift.id}`);
+    const engineEventById = new Map(engineEvents.map((event) => [Number(event.id), event]));
 
     table(
       "shiftReport",
@@ -624,13 +630,17 @@ async function loadShiftReport() {
       }
 
       const type = String(t.transaction_type || "").replaceAll("_", " ");
+      const isEngineEvent = t.transaction_type === "ENGINE_CONSUMPTION" && t.reference_type === "ENGINE_EVENT";
+      const operatorRemark = isEngineEvent
+        ? engineEventById.get(Number(t.reference_id))?.remarks
+        : t.remarks;
 
       return [
         formatDateTime(t.transaction_date),
         type,
         details,
         `${litres(t.quantity)} L`,
-        esc(t.remarks || "-"),
+        esc(operatorRemark || "-"),
       ];
     });
 
@@ -1138,6 +1148,57 @@ ${
 }`,
     ]),
   );
+}
+
+function transferReportQuery() {
+  const query = new URLSearchParams();
+  const fromDate = $("transferReportFrom").value;
+  const toDate = $("transferReportTo").value;
+  const status = $("transferReportStatus").value;
+  const vesselId = $("transferReportVessel").value;
+  if (fromDate) query.set("from_date", fromDate);
+  if (toDate) query.set("to_date", toDate);
+  if (status) query.set("status", status);
+  if (vesselId) query.set("vessel_id", vesselId);
+  return query.toString();
+}
+
+async function loadTransferReport() {
+  if (me?.role !== "ADMIN") throw Error("Only an administrator can view transfer reports.");
+  const rows = await api(`/api/transfers/admin/report?${transferReportQuery()}`);
+  $("transferReportStatusMessage").textContent = `${rows.length} transfer${rows.length === 1 ? "" : "s"} found.`;
+  table("transferReportList", ["ID", "From", "To", "Date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark"], rows.map((row) => [
+    row.id, esc(row.from_vessel), esc(row.to_vessel), formatDateTime(row.transfer_date),
+    litres(row.initiated_quantity), litres(row.received_quantity), litres(row.loss_quantity),
+    esc(row.status), esc(row.notes || "—"), esc(row.manager_remark || "—"),
+  ]));
+}
+
+async function exportTransferReport() {
+  try {
+    if (me?.role !== "ADMIN") throw Error("Only an administrator can export transfer reports.");
+    const response = await fetch(`/api/transfers/admin/report.csv?${transferReportQuery()}`, {
+      headers: { Authorization: `Bearer ${token()}` },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw Error(body?.detail || "Transfer export failed.");
+    }
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(await response.blob());
+    link.download = "insitefuel_transfers.csv";
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch (error) { message(error.message, "error"); }
+}
+
+function showTransferView(view) {
+  if (view === "report" && me?.role !== "ADMIN") return;
+  $("transferRegisterView").classList.toggle("hidden", view !== "register");
+  $("transferReportView").classList.toggle("hidden", view !== "report");
+  document.querySelectorAll("[data-transfer-view]").forEach((button) =>
+    button.classList.toggle("active", button.dataset.transferView === view));
+  if (view === "report") loadTransferReport().catch((error) => message(error.message, "error"));
 }
 async function saveProduction() {
   try {
@@ -6990,6 +7051,9 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
       message(e.message, "error");
     }
   }),
+);
+document.querySelectorAll("[data-transfer-view]").forEach((button) =>
+  button.addEventListener("click", () => showTransferView(button.dataset.transferView)),
 );
 $('changeOpeningFuelButton').addEventListener('click', changeOpeningFuel);
 $("shiftVessel").addEventListener("change", refreshShiftEquipment);

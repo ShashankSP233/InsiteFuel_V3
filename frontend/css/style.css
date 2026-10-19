@@ -113,6 +113,24 @@ body {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
+.subtab-bar {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+.subtab-btn {
+  background: transparent;
+  color: var(--ink3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.subtab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
 
 /* ── Cards / sections ── */
 .card {
