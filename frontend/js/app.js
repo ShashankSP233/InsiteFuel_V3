@@ -2255,6 +2255,11 @@ async function loadCharts() {
     const allRows = Array.isArray(dashboard?.rows)
       ? dashboard.rows
       : [];
+    for (let page = 2; page <= Number(dashboard?.total_pages || 0); page += 1) {
+      query.set("page", String(page));
+      const nextPage = await api(`/api/dashboard/fuel?${query.toString()}`);
+      if (Array.isArray(nextPage?.rows)) allRows.push(...nextPage.rows);
+    }
 
 
     // Only selected vessels.
