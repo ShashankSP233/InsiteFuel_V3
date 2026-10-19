@@ -6,11 +6,10 @@ unless a person closes it first.
 
 ## Endpoint
 
-`POST /api/iot/shift-data`  — header `X-API-Key: <shared secret>`, JSON body = one object **or an array** of objects
-(the format of `smaplextrl.json`).
+`POST /api/iot/shift-data` — header `X-API-Key: <shared secret>`, JSON body = one object **or an array** of objects (the format of `smaplextrl.json`).
 
 | Result | HTTP | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | all items `PROCESSED` / `DUPLICATE` / `AWAITING_MAPPING` | 200 | applied, already known, or safely stored until an administrator maps it |
 | any item `REJECTED` | 422 | body lists the reason per item (`results[].errors`); payload is stored and can be re-processed |
 | unexpected server error | 500 | payload is still stored as REJECTED |
