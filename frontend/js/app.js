@@ -85,10 +85,7 @@ function litres(value) {
     return "—";
   }
 
-  return Number(value).toLocaleString(undefined, {
-    minimumFractionDigits: 3,
-    maximumFractionDigits: 3,
-  });
+  return Math.round(Number(value)).toLocaleString();
 }
 
 function formatDateTime(value) {
@@ -863,7 +860,7 @@ async function addEngine() {
     });
 
     message(
-      `Engine event recorded: ${litres(consumption)} L over ${hours.toFixed(2)} hours (${lph.toFixed(2)} L/hr).`,
+      `Engine event recorded: ${litres(consumption)} L over ${hours.toFixed(2)} hours (${Math.round(lph).toLocaleString()} L/hr).`,
       "success",
     );
 
@@ -911,9 +908,9 @@ function calculateEngineRate() {
   const hours = (stop - start) / 3600000;
   const lph = consumption / hours;
 
-  lphField.value = lph.toFixed(3);
+  lphField.value = String(Math.round(lph));
 
-  display.textContent = `Calculated ${hours.toFixed(2)} hours × ${lph.toFixed(2)} L/hr = ${litres(consumption)} L`;
+  display.textContent = `Calculated ${hours.toFixed(2)} hours × ${Math.round(lph).toLocaleString()} L/hr = ${litres(consumption)} L`;
 
   display.classList.remove("hidden");
 }
@@ -1237,7 +1234,7 @@ async function loadProduction() {
       x.shift_id,
       f(x.as_per_qty),
       f(x.true_qty),
-      f(x.fuel_rate),
+      litres(x.fuel_rate),
     ]),
   );
 }
@@ -1846,7 +1843,7 @@ async function loadDashboard() {
       ]),
     );
     $("efficiencyView").innerHTML =
-      `<div class="stat-row"><div class="stat-block"><div class="stat-label">Fuel consumed</div><div class="stat-val">${litres(e.total_consumption)} L</div></div><div class="stat-block"><div class="stat-label">Production</div><div class="stat-val">${f(e.total_production)} m³</div></div><div class="stat-block"><div class="stat-label">L / m³</div><div class="stat-val">${f(e.consumption_per_unit)}</div></div></div>`;
+      `<div class="stat-row"><div class="stat-block"><div class="stat-label">Fuel consumed</div><div class="stat-val">${litres(e.total_consumption)} L</div></div><div class="stat-block"><div class="stat-label">Production</div><div class="stat-val">${f(e.total_production)} m³</div></div><div class="stat-block"><div class="stat-label">L / m³</div><div class="stat-val">${litres(e.consumption_per_unit)}</div></div></div>`;
   } catch (e) {
     message(e.message, "error");
   }
@@ -2151,7 +2148,7 @@ function lineChartOptions(yTitle) {
             return `${context.dataset.label}: ${chartNumber(
               context.raw
             ).toLocaleString(undefined, {
-              maximumFractionDigits: 2,
+              maximumFractionDigits: 0,
             })} ${yTitle}`;
           },
         },
@@ -2176,6 +2173,9 @@ function lineChartOptions(yTitle) {
         title: {
           display: true,
           text: yTitle,
+        },
+        ticks: {
+          callback: (value) => Math.round(Number(value)).toLocaleString(),
         },
       },
     },
@@ -2693,9 +2693,7 @@ async function loadCharts() {
                     }
 
                     return `${
-                      Number(
-                        context.raw
-                      ).toFixed(2)
+                      Math.round(Number(context.raw)).toLocaleString()
                     } L/hr`;
                   },
                 },
@@ -2715,6 +2713,9 @@ async function loadCharts() {
                 title: {
                   display: true,
                   text: "L/hr",
+                },
+                ticks: {
+                  callback: (value) => Math.round(Number(value)).toLocaleString(),
                 },
               },
             },
@@ -2884,7 +2885,7 @@ async function loadCharts() {
                   label: (context) =>
                     `${chartNumber(
                       context.raw
-                    ).toLocaleString()} L`,
+                    ).toLocaleString(undefined, { maximumFractionDigits: 0 })} L`,
                 },
               },
             },
@@ -2902,6 +2903,9 @@ async function loadCharts() {
                 title: {
                   display: true,
                   text: "Litres",
+                },
+                ticks: {
+                  callback: (value) => Math.round(Number(value)).toLocaleString(),
                 },
               },
             },
@@ -3011,7 +3015,7 @@ async function loadCharts() {
                     return `${
                       context.label
                     }: ${
-                      value.toLocaleString()
+                      value.toLocaleString(undefined, { maximumFractionDigits: 0 })
                     } L (${
                       percentage
                     }%)`;
@@ -5017,7 +5021,7 @@ async function loadAdminShiftSupplementary(
       f(record.as_per_qty),
       f(record.true_qty),
       f(Number(record.true_qty) - Number(record.as_per_qty)),
-      f(record.fuel_rate),
+      litres(record.fuel_rate),
       esc(record.remarks || "-"),
       `<button class="btn btn-sm" onclick="beginAdminProductionEdit(${record.id})">Edit</button> <button class="btn btn-sm btn-ghost" onclick="deleteAdminProduction(${record.id})">Delete</button>`,
     ]),

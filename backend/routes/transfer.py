@@ -1,6 +1,7 @@
 import csv
 import io
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
@@ -317,7 +318,18 @@ def export_admin_transfer_report(
         text = "" if value is None else str(value)
         return f"'{text}" if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
 
-    writer.writerows([[safe_cell(row[key]) for key in ("id", "from_vessel", "to_vessel", "transfer_date", "initiated_quantity", "received_quantity", "loss_quantity", "status", "notes", "manager_remark")] for row in rows])
+    fields = ("id", "from_vessel", "to_vessel", "transfer_date", "initiated_quantity", "received_quantity", "loss_quantity", "status", "notes", "manager_remark")
+    quantity_fields = {"initiated_quantity", "received_quantity", "loss_quantity"}
+    csv_rows = []
+    for row in rows:
+        values = []
+        for key in fields:
+            value = row[key]
+            if value is not None and key in quantity_fields:
+                value = str(Decimal(value).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            values.append(safe_cell(value))
+        csv_rows.append(values)
+    writer.writerows(csv_rows)
     suffix = f"_{from_date}_{to_date}" if from_date and to_date else ""
     return Response(
         content="\ufeff" + output.getvalue(),

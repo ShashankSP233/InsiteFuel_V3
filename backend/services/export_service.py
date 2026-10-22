@@ -1,5 +1,5 @@
 from io import BytesIO, StringIO
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import csv
 
 from openpyxl import Workbook
@@ -92,8 +92,13 @@ class ExportService:
         if isinstance(value, list):
             return ", ".join(str(item) for item in value)
 
-        if isinstance(value, Decimal):
-            return str(value)
+        if isinstance(value, (Decimal, int, float)) and not isinstance(value, bool):
+            return str(
+                Decimal(str(value)).quantize(
+                    Decimal("1"),
+                    rounding=ROUND_HALF_UP,
+                )
+            )
 
         return str(value)
 
