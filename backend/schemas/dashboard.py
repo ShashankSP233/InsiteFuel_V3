@@ -49,6 +49,7 @@ class FuelDashboardResponse(BaseModel):
 
     total_fuel: Decimal
     total_received: Decimal
+    total_transfer_in: Decimal
     total_consumption: Decimal
     total_transfer_out: Decimal
     total_issue_out: Decimal
@@ -72,6 +73,7 @@ class FuelDashboardSummary(BaseModel):
 
     total_fuel: Decimal
     total_received: Decimal
+    total_transfer_in: Decimal
     total_consumption: Decimal
     total_transfer_out: Decimal
     total_issue_out: Decimal

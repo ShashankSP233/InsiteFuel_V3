@@ -74,6 +74,10 @@ def get_fuel_dashboard(
         (row["received_fuel"] for row in rows),
         Decimal("0"),
     )
+    total_transfer_in = sum(
+        (row["transfer_in"] for row in rows),
+        Decimal("0"),
+    )
 
     total_consumption = sum(
         (row["total_engine_consumption"] for row in rows),
@@ -139,6 +143,7 @@ def get_fuel_dashboard(
         rows=paginated_rows,
         total_fuel=total_fuel,
         total_received=total_received,
+        total_transfer_in=total_transfer_in,
         total_consumption=total_consumption,
         total_transfer_out=total_transfer_out,
         total_issue_out=total_issue_out,
@@ -176,6 +181,10 @@ def get_dashboard_summary(
 
     total_received = sum(
         (row["received_fuel"] for row in rows),
+        Decimal("0"),
+    )
+    total_transfer_in = sum(
+        (row["transfer_in"] for row in rows),
         Decimal("0"),
     )
 
@@ -222,6 +231,7 @@ def get_dashboard_summary(
         to_date=to_date,
         total_fuel=total_fuel,
         total_received=total_received,
+        total_transfer_in=total_transfer_in,
         total_consumption=total_consumption,
         total_transfer_out=total_transfer_out,
         total_issue_out=total_issue_out,

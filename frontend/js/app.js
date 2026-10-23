@@ -1876,6 +1876,7 @@ async function loadDashboard() {
     $("kpis").innerHTML = [
       ["Current fuel", d.total_fuel, true],
       ["Received", d.total_received, true],
+      ["Transfer in", d.total_transfer_in, true],
       ["Consumption", d.total_consumption, true],
       ["Transfer out", d.total_transfer_out, true],
       ["Issued to untracked vessels", d.total_issue_out, true],
