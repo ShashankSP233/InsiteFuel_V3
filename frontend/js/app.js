@@ -1171,11 +1171,32 @@ async function loadTransferReport() {
   if (me?.role !== "ADMIN") throw Error("Only an administrator can view transfer reports.");
   const rows = await api(`/api/transfers/admin/report?${transferReportQuery()}`);
   $("transferReportStatusMessage").textContent = `${rows.length} transfer${rows.length === 1 ? "" : "s"} found.`;
-  table("transferReportList", ["ID", "From", "To", "Date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark"], rows.map((row) => [
+  table("transferReportList", ["ID", "From", "To", "Date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark", "Actions"], rows.map((row) => [
     row.id, esc(row.from_vessel), esc(row.to_vessel), formatDateTime(row.transfer_date),
     litres(row.initiated_quantity), litres(row.received_quantity), litres(row.loss_quantity),
     esc(row.status), esc(row.notes || "—"), esc(row.manager_remark || "—"),
+    row.status === "BALANCES_UPDATED" && ["MISSING", "PARTIAL"].includes(row.ledger_state)
+      ? `<button class="btn btn-sm" onclick="recordBalanceNeutralTransfer(${row.id})">Add to fuel transactions</button>`
+      : esc(row.ledger_state || "—"),
   ]));
+}
+
+async function recordBalanceNeutralTransfer(transferId) {
+  try {
+    if (me?.role !== "ADMIN") throw Error("Only an administrator can record transfer transactions.");
+    const reason = prompt("Reason for adding transfer entries without changing balances:", "Transfer already reflected in both vessels' opening balances");
+    if (reason === null) return;
+    if (!reason.trim()) throw Error("Enter a reason.");
+    if (!confirm(`Add transfer #${transferId} to both vessels' fuel transactions for dashboard visibility?\n\nThis will not change either shift's opening or closing balance.`)) return;
+    const result = await api(`/api/transfers/admin/${transferId}/record-balance-neutral-ledger`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason.trim() }),
+    });
+    message(result.created
+      ? `Added ${result.created} transfer transaction entries. Shift balances were unchanged.`
+      : "Transfer ledger entries are already recorded; balances are unchanged.", "success");
+    await loadTransferReport();
+  } catch (error) { message(error.message, "error"); }
 }
 
 async function exportTransferReport() {
@@ -4989,12 +5010,13 @@ async function viewAdminShift(shiftId, skipUnsavedPrompt = false) {
 
     table(
       "adminShiftTransactions",
-      ["Date", "Type", "Direction", "Quantity", "Source / Reference", "Remarks", ""],
+      ["Date", "Type", "Direction", "Quantity", "Balance effect", "Source / Reference", "Remarks", ""],
       (report.transactions || []).map((transaction) => [
         esc(formatDateTime(transaction.transaction_date)),
         esc(String(transaction.transaction_type).replaceAll("_", " ")),
         esc(transaction.adjustment_direction || "-"),
         `${litres(transaction.quantity)} L`,
+        transaction.affects_balance === false ? "Recorded only" : "Applied",
         esc(
           transaction.fuel_source ||
           (transaction.source_vessel_id

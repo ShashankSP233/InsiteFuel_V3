@@ -373,8 +373,10 @@ class FuelService:
 
         received_fuel = Decimal("0")
         transfer_in = Decimal("0")
+        balance_transfer_in = Decimal("0")
         engine_consumption = Decimal("0")
         transfer_out = Decimal("0")
+        balance_transfer_out = Decimal("0")
         issue_out = Decimal("0")
         adjustment_in = Decimal("0")
         adjustment_out = Decimal("0")
@@ -387,12 +389,16 @@ class FuelService:
 
             elif transaction.transaction_type == FuelTransactionType.TRANSFER_IN.value:
                 transfer_in += quantity
+                if transaction.affects_balance:
+                    balance_transfer_in += quantity
 
             elif transaction.transaction_type == FuelTransactionType.ENGINE_CONSUMPTION.value:
                 engine_consumption += quantity
 
             elif transaction.transaction_type == FuelTransactionType.TRANSFER_OUT.value:
                 transfer_out += quantity
+                if transaction.affects_balance:
+                    balance_transfer_out += quantity
 
             elif transaction.transaction_type == FuelTransactionType.ISSUE_OUT.value:
                 issue_out += quantity
@@ -420,9 +426,9 @@ class FuelService:
         closing_fuel = (
             opening_fuel
             + received_fuel
-            + transfer_in
+            + balance_transfer_in
             - engine_consumption
-            - transfer_out
+            - balance_transfer_out
             - issue_out
             + adjustment_in
             - adjustment_out

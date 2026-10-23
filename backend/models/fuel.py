@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, Integer
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Numeric, String, Integer, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.database import Base
@@ -59,6 +59,13 @@ class FuelTransaction(Base):
         String(30),
         nullable=False,
         index=True,
+    )
+
+    affects_balance: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=true(),
     )
 
     quantity: Mapped[Decimal] = mapped_column(

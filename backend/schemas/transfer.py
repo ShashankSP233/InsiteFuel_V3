@@ -95,3 +95,7 @@ class AdminTransferCorrection(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
     reason: str = Field(min_length=1, max_length=1000)
     reconcile_downstream: bool = False
+
+
+class BalanceNeutralTransferLedgerRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=1000)

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.dependencies import get_current_user, require_roles
+from backend.models.fuel import FuelTransaction
 from backend.models.shift import Shift
 from backend.models.transfer import FuelTransfer, TransferStatus
 from backend.models.vessel import Vessel
@@ -23,6 +24,7 @@ from backend.schemas.transfer import (
     TransferResponse,
     TransferReceive,
     TransferSubmitReview,
+    BalanceNeutralTransferLedgerRequest,
 )
 
 from backend.schemas.transfer_attachment import (
@@ -40,6 +42,32 @@ router = APIRouter(
     prefix="/api/transfers",
     tags=["Transfers"],
 )
+
+
+@router.post("/admin/{transfer_id}/record-balance-neutral-ledger")
+def record_balance_neutral_transfer_ledger(
+    transfer_id: int,
+    data: BalanceNeutralTransferLedgerRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.ADMIN)),
+):
+    try:
+        entries = TransferService.record_balance_neutral_ledger(
+            db,
+            transfer_id=transfer_id,
+            recorded_by_user_id=current_user.id,
+            reason=data.reason,
+        )
+        db.commit()
+        return {
+            "transfer_id": transfer_id,
+            "created": len(entries),
+            "transaction_ids": [entry.id for entry in entries],
+            "balances_changed": False,
+        }
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post(
@@ -263,6 +291,33 @@ def _admin_transfer_rows(
         )
     transfers = db.scalars(statement.order_by(FuelTransfer.transfer_date.desc(), FuelTransfer.id.desc())).all()
     vessel_ids = {value for transfer in transfers for value in (transfer.from_vessel_id, transfer.to_vessel_id)}
+    transfer_ids = [transfer.id for transfer in transfers]
+    ledger_entries = db.execute(
+        select(
+            FuelTransaction.reference_id,
+            FuelTransaction.reference_type,
+            FuelTransaction.transaction_type,
+        ).where(
+            FuelTransaction.reference_id.in_(transfer_ids),
+            FuelTransaction.reference_type.in_(
+                ("TRANSFER", "BALANCE_NEUTRAL_TRANSFER")
+            ),
+        )
+    ).all() if transfer_ids else []
+    ledger_by_transfer: dict[int, list[tuple[str, str]]] = {}
+    for reference_id, reference_type, transaction_type in ledger_entries:
+        ledger_by_transfer.setdefault(reference_id, []).append(
+            (reference_type, transaction_type)
+        )
+    def ledger_state(transfer: FuelTransfer) -> str:
+        entries = ledger_by_transfer.get(transfer.id, [])
+        if any(kind == "TRANSFER" for kind, _ in entries):
+            return "RECORDED"
+        if not entries:
+            return "MISSING"
+        transaction_types = {transaction_type for _, transaction_type in entries}
+        expected_types = {"TRANSFER_OUT", "TRANSFER_IN"}
+        return "BALANCE_NEUTRAL" if expected_types.issubset(transaction_types) else "PARTIAL"
     names = {
         vessel.id: vessel.name
         for vessel in db.scalars(select(Vessel).where(Vessel.id.in_(vessel_ids))).all()
@@ -279,6 +334,7 @@ def _admin_transfer_rows(
             "status": transfer.status.value if hasattr(transfer.status, "value") else transfer.status,
             "notes": transfer.notes,
             "manager_remark": transfer.manager_remark,
+            "ledger_state": ledger_state(transfer),
         }
         for transfer in transfers
     ]

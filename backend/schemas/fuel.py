@@ -42,6 +42,7 @@ class FuelTransactionResponse(BaseModel):
     vessel_id: int
     transaction_type: str
     quantity: Decimal
+    affects_balance: bool = True
     adjustment_direction: str | None
     reference_type: str | None
     reference_id: int | None

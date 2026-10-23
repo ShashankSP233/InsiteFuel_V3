@@ -18,6 +18,112 @@ from backend.models.transfer_attachment import TransferAttachment
 class TransferService:
 
     @staticmethod
+    def record_balance_neutral_ledger(
+        db: Session,
+        *,
+        transfer_id: int,
+        recorded_by_user_id: int,
+        reason: str,
+    ) -> list[FuelTransaction]:
+        """Add transfer ledger visibility when balances were adjusted separately."""
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("A reason is required.")
+
+        transfer = db.scalar(
+            select(FuelTransfer)
+            .where(FuelTransfer.id == transfer_id)
+            .with_for_update()
+        )
+        if transfer is None:
+            raise ValueError("Transfer not found.")
+        if transfer.status != TransferStatus.BALANCES_UPDATED.value:
+            raise ValueError("Only BALANCES_UPDATED transfers can be recorded this way.")
+        if transfer.received_quantity is None or transfer.received_quantity <= 0:
+            raise ValueError("Transfer must have a positive received quantity.")
+
+        shifts = FuelService.lock_shifts(
+            db, [transfer.from_shift_id, transfer.to_shift_id]
+        )
+        source_shift = shifts[transfer.from_shift_id]
+        destination_shift = shifts[transfer.to_shift_id]
+        if source_shift.vessel_id != transfer.from_vessel_id:
+            raise ValueError("Source shift does not belong to the transfer source vessel.")
+        if destination_shift.vessel_id != transfer.to_vessel_id:
+            raise ValueError("Destination shift does not belong to the transfer destination vessel.")
+
+        transactions = db.scalars(
+            select(FuelTransaction)
+            .where(
+                FuelTransaction.reference_id == transfer.id,
+                FuelTransaction.reference_type.in_(
+                    ("TRANSFER", "BALANCE_NEUTRAL_TRANSFER")
+                ),
+            )
+            .with_for_update()
+        ).all()
+        if any(item.reference_type == "TRANSFER" for item in transactions):
+            raise ValueError(
+                "This transfer already has balance-affecting ledger entries."
+            )
+
+        existing_by_type = {item.transaction_type: item for item in transactions}
+        entries: list[FuelTransaction] = []
+        if FuelTransactionType.TRANSFER_OUT.value not in existing_by_type:
+            entries.append(FuelTransaction(
+                shift_id=source_shift.id,
+                vessel_id=transfer.from_vessel_id,
+                transaction_type=FuelTransactionType.TRANSFER_OUT.value,
+                quantity=transfer.initiated_quantity,
+                reference_type="BALANCE_NEUTRAL_TRANSFER",
+                reference_id=transfer.id,
+                transaction_date=transfer.transfer_date,
+                remarks=f"Transfer #{transfer.id} out; already reflected in opening balance.",
+                created_by_user_id=recorded_by_user_id,
+                affects_balance=False,
+            ))
+        if FuelTransactionType.TRANSFER_IN.value not in existing_by_type:
+            entries.append(FuelTransaction(
+                shift_id=destination_shift.id,
+                vessel_id=transfer.to_vessel_id,
+                transaction_type=FuelTransactionType.TRANSFER_IN.value,
+                quantity=transfer.received_quantity,
+                reference_type="BALANCE_NEUTRAL_TRANSFER",
+                reference_id=transfer.id,
+                transaction_date=transfer.transfer_date,
+                remarks=f"Transfer #{transfer.id} in; already reflected in opening balance.",
+                created_by_user_id=recorded_by_user_id,
+                affects_balance=False,
+                source_vessel_id=transfer.from_vessel_id,
+            ))
+
+        if not entries:
+            return []
+
+        db.add_all(entries)
+        db.flush()
+        AuditService.log(
+            db=db,
+            user_id=recorded_by_user_id,
+            action="RECORD_BALANCE_NEUTRAL_TRANSFER_LEDGER",
+            entity="transfers",
+            entity_id=transfer.id,
+            old_values={"fuel_ledger_entries": len(transactions)},
+            new_values={
+                "fuel_ledger_entries_added": [entry.id for entry in entries],
+                "initiated_quantity": str(transfer.initiated_quantity),
+                "received_quantity": str(transfer.received_quantity),
+                "affects_balance": False,
+            },
+            reason=reason,
+            details=(
+                "Transfer ledger entries were added for dashboard/report visibility. "
+                "Existing shift opening and closing balances were not recalculated or changed."
+            ),
+        )
+        return entries
+
+    @staticmethod
     def initiate_transfer(
         db: Session,
         from_vessel_id: int,
