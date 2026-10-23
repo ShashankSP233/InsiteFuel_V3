@@ -5,8 +5,9 @@ import csv
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import landscape, A4
+from reportlab.lib.pagesizes import landscape, A3
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate,
     Table,
@@ -42,6 +43,24 @@ class ExportService:
         ("Flags", "flags"),
     ]
 
+    PDF_COLUMNS = [
+        ("Date", "shift_date"),
+        ("Vessel", "vessel_name"),
+        ("Shift", "shift_name"),
+        ("Opening Fuel (L)", "opening_fuel"),
+        ("Received Fuel (L)", "received_fuel"),
+        ("Transfer In (L)", "transfer_in"),
+        ("ME Consumption (L)", "me_consumption"),
+        ("ME Hours", "me_hours"),
+        ("AUX Consumption (L)", "aux_consumption"),
+        ("AUX Hours", "aux_hours"),
+        ("DG Consumption (L)", "dg_consumption"),
+        ("DG Hours", "dg_hours"),
+        ("Total Engine Consumption (L)", "total_engine_consumption"),
+        ("Transfer Out (L)", "transfer_out"),
+        ("Closing Fuel (L)", "closing_fuel"),
+    ]
+
     @staticmethod
     def get_rows(
         db,
@@ -49,8 +68,12 @@ class ExportService:
         from_date,
         to_date,
         vessel_ids=None,
+        vessel_id=None,
         shift_name=None,
     ) -> list[dict]:
+
+        if vessel_id is not None:
+            vessel_ids = [vessel_id]
 
         if vessel_ids:
             rows = []
@@ -66,24 +89,24 @@ class ExportService:
 
                 rows.extend(vessel_rows)
 
-            rows.sort(
-                key=lambda row: (
-                    row["shift_date"],
-                    row["vessel_name"],
-                    row["shift_name"] or "",
-                    row["shift_id"],
-                ),
-                reverse=True,
+        else:
+            rows = DashboardService.get_fuel_dashboard(
+                db=db,
+                from_date=from_date,
+                to_date=to_date,
+                shift_name=shift_name,
             )
 
-            return rows
-
-        return DashboardService.get_fuel_dashboard(
-            db=db,
-            from_date=from_date,
-            to_date=to_date,
-            shift_name=shift_name,
+        shift_order = {"MORNING": 0, "EVENING": 1}
+        rows.sort(
+            key=lambda row: (
+                row["shift_date"],
+                shift_order.get(str(row["shift_name"] or "").upper(), 2),
+                row["vessel_name"].casefold(),
+                row["shift_id"],
+            )
         )
+        return rows
 
     @staticmethod
     def _format_value(value):
@@ -192,7 +215,7 @@ class ExportService:
 
         document = SimpleDocTemplate(
             output,
-            pagesize=landscape(A4),
+            pagesize=landscape(A3),
             rightMargin=20,
             leftMargin=20,
             topMargin=20,
@@ -200,30 +223,41 @@ class ExportService:
         )
 
         styles = getSampleStyleSheet()
+        table_header_style = ParagraphStyle(
+            "FuelDashboardHeader",
+            parent=styles["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=6,
+            leading=7,
+        )
+        table_cell_style = ParagraphStyle(
+            "FuelDashboardCell",
+            parent=styles["Normal"],
+            fontSize=6,
+            leading=7,
+        )
 
         title = Paragraph(
             "InsiteFuel V3 - Fuel Dashboard",
             styles["Title"],
         )
 
-        headers = [
-            column_name
-            for column_name, _ in ExportService.COLUMNS
-        ]
+        headers = [column_name for column_name, _ in ExportService.PDF_COLUMNS]
 
-        data = [headers]
+        data = [[Paragraph(header, table_header_style) for header in headers]]
 
         for row in rows:
             data.append(
                 [
-                    ExportService._format_value(row[field])
-                    for _, field in ExportService.COLUMNS
+                    Paragraph(ExportService._format_value(row[field]), table_cell_style)
+                    for _, field in ExportService.PDF_COLUMNS
                 ]
             )
 
         table = Table(
             data,
             repeatRows=1,
+            colWidths=[52, 110, 58, 75, 75, 75, 75, 60, 75, 60, 75, 60, 85, 75, 75],
         )
 
         table.setStyle(

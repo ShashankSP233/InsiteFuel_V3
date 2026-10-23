@@ -39,6 +39,7 @@ def export_csv(
     from_date: date | None = Query(None),
     to_date: date | None = Query(None),
     shift_name: str | None = Query(None),
+    vessel_id: int | None = Query(None),
     vessel_ids: list[int] | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -53,6 +54,7 @@ def export_csv(
         from_date=from_date,
         to_date=to_date,
         vessel_ids=vessel_ids,
+        vessel_id=vessel_id,
         shift_name=shift_name,
     )
 
@@ -75,6 +77,7 @@ def export_excel(
     from_date: date | None = Query(None),
     to_date: date | None = Query(None),
     shift_name: str | None = Query(None),
+    vessel_id: int | None = Query(None),
     vessel_ids: list[int] | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -89,6 +92,7 @@ def export_excel(
         from_date=from_date,
         to_date=to_date,
         vessel_ids=vessel_ids,
+        vessel_id=vessel_id,
         shift_name=shift_name,
     )
 
@@ -114,6 +118,7 @@ def export_pdf(
     from_date: date | None = Query(None),
     to_date: date | None = Query(None),
     shift_name: str | None = Query(None),
+    vessel_id: int | None = Query(None),
     vessel_ids: list[int] | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -128,6 +133,7 @@ def export_pdf(
         from_date=from_date,
         to_date=to_date,
         vessel_ids=vessel_ids,
+        vessel_id=vessel_id,
         shift_name=shift_name,
     )
 
