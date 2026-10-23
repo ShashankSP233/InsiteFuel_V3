@@ -84,6 +84,7 @@ def get_fuel_dashboard(
         (row["transfer_out"] for row in rows),
         Decimal("0"),
     )
+    total_issue_out = sum((row["issue_out"] for row in rows), Decimal("0"))
 
     total_advancement_m = sum(
         (
@@ -140,6 +141,7 @@ def get_fuel_dashboard(
         total_received=total_received,
         total_consumption=total_consumption,
         total_transfer_out=total_transfer_out,
+        total_issue_out=total_issue_out,
         total_advancement_m=total_advancement_m,
         total_dredging_hours=total_dredging_hours,
         record_count=len(paginated_rows),
@@ -186,6 +188,7 @@ def get_dashboard_summary(
         (row["transfer_out"] for row in rows),
         Decimal("0"),
     )
+    total_issue_out = sum((row["issue_out"] for row in rows), Decimal("0"))
 
     negative_balance_count = len({
         row["vessel_id"]
@@ -221,6 +224,7 @@ def get_dashboard_summary(
         total_received=total_received,
         total_consumption=total_consumption,
         total_transfer_out=total_transfer_out,
+        total_issue_out=total_issue_out,
         active_vessel_count=len(vessel_ids),
         negative_balance_count=negative_balance_count,
         low_fuel_count=low_fuel_count,

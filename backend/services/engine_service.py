@@ -42,6 +42,7 @@ class EngineService:
         created_by_user_id: int,
         consumption: Decimal | None = None,
         remarks: str | None = None,
+        reconcile_downstream: bool = False,
     ) -> EngineEvent:
 
         if lph_rate < 0:
@@ -65,7 +66,8 @@ class EngineService:
         if shift.status != "OPEN":
             raise ValueError("Engine events can only be added to an OPEN shift")
 
-        if FuelService.has_later_shift(db, shift):
+        has_later_shift = FuelService.has_later_shift(db, shift)
+        if has_later_shift and not reconcile_downstream:
             raise ValueError(
                 "This event would change fuel available to subsequent shifts; "
                 "downstream reconciliation is required first."
@@ -119,7 +121,13 @@ class EngineService:
             engine_event_id=event.id,
             created_by_user_id=created_by_user_id,
             remarks=f"Engine event #{event.id}",
+            allow_downstream_reconciliation=has_later_shift,
         )
+        if has_later_shift:
+            FuelService.reconcile_downstream_shifts(
+                db, shift_id=shift.id, reconciled_by_user_id=created_by_user_id,
+                reason=f"Create engine event #{event.id}",
+            )
 
         AuditService.log(
             db=db,
@@ -217,6 +225,7 @@ class EngineService:
         reason: str,
         consumption: Decimal | None = None,
         remarks: str | None = None,
+        reconcile_downstream: bool = False,
     ) -> EngineEvent:
         event = db.get(EngineEvent, event_id)
         if event is None:
@@ -250,10 +259,9 @@ class EngineService:
             raise ValueError("Engine consumption must be greater than zero")
 
         transaction = EngineService._get_linked_fuel_transaction(db, event)
-        if (
-            Decimal(str(transaction.quantity)) != consumption
-            and FuelService.has_later_shift(db, shift)
-        ):
+        changed_fuel = Decimal(str(transaction.quantity)) != consumption
+        has_later_shift = FuelService.has_later_shift(db, shift)
+        if changed_fuel and has_later_shift and not reconcile_downstream:
             raise ValueError(
                 "This correction would change fuel available to subsequent shifts; "
                 "downstream reconciliation is required first."
@@ -276,6 +284,11 @@ class EngineService:
 
         db.flush()
         FuelService.recalculate_shift(db, shift_id)
+        if changed_fuel and has_later_shift:
+            FuelService.reconcile_downstream_shifts(
+                db, shift_id=shift_id, reconciled_by_user_id=corrected_by_user_id,
+                reason=reason,
+            )
         AuditService.log(
             db=db,
             user_id=corrected_by_user_id,
@@ -303,6 +316,7 @@ class EngineService:
         shift_id: int,
         deleted_by_user_id: int,
         reason: str,
+        reconcile_downstream: bool = False,
     ) -> None:
         event = db.get(EngineEvent, event_id)
         if event is None:
@@ -316,7 +330,8 @@ class EngineService:
             raise ValueError("Correction reason is required")
 
         transaction = EngineService._get_linked_fuel_transaction(db, event)
-        if FuelService.has_later_shift(db, shift):
+        has_later_shift = FuelService.has_later_shift(db, shift)
+        if has_later_shift and not reconcile_downstream:
             raise ValueError(
                 "This deletion would change fuel available to subsequent shifts; "
                 "downstream reconciliation is required first."
@@ -333,6 +348,11 @@ class EngineService:
         db.delete(event)
         db.flush()
         FuelService.recalculate_shift(db, shift_id)
+        if has_later_shift:
+            FuelService.reconcile_downstream_shifts(
+                db, shift_id=shift_id, reconciled_by_user_id=deleted_by_user_id,
+                reason=reason,
+            )
         AuditService.log(
             db=db,
             user_id=deleted_by_user_id,

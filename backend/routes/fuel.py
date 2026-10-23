@@ -506,6 +506,7 @@ def admin_correct_adjustment(
             new_direction=AdjustmentDirection(payload.direction),
             corrected_by_user_id=current_user.id,
             correction_remarks=payload.reason,
+            reconcile_downstream=payload.reconcile_downstream,
         )
         db.commit()
         db.refresh(corrected)
@@ -538,6 +539,7 @@ def admin_correct_receipt(
             remarks=payload.remarks,
             corrected_by_user_id=current_user.id,
             reason=payload.reason,
+            reconcile_downstream=payload.reconcile_downstream,
         )
         db.commit()
         db.refresh(transaction)

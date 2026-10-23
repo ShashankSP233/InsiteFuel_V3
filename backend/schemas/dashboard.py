@@ -29,6 +29,7 @@ class FuelDashboardRow(BaseModel):
 
     total_engine_consumption: Decimal
     transfer_out: Decimal
+    issue_out: Decimal
 
     adjustment_in: Decimal
     adjustment_out: Decimal
@@ -50,6 +51,7 @@ class FuelDashboardResponse(BaseModel):
     total_received: Decimal
     total_consumption: Decimal
     total_transfer_out: Decimal
+    total_issue_out: Decimal
     total_advancement_m: Decimal
     total_dredging_hours: Decimal
 
@@ -72,6 +74,7 @@ class FuelDashboardSummary(BaseModel):
     total_received: Decimal
     total_consumption: Decimal
     total_transfer_out: Decimal
+    total_issue_out: Decimal
 
     active_vessel_count: int
     negative_balance_count: int

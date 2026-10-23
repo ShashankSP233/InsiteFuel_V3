@@ -14,6 +14,7 @@ from backend.routes.equipment import router as equipment_router
 from backend.routes.fuel import router as fuel_router
 from backend.routes import engine
 from backend.routes.transfer import router as transfer_router
+from backend.routes.issues import router as issues_router
 from backend.routes.audit import router as audit_router
 from backend.routes.attachments import router as attachments_router
 from backend.routes.soundings import router as soundings_router
@@ -110,6 +111,8 @@ app.include_router(fuel_router)
 app.include_router(engine.router)
 
 app.include_router(transfer_router)
+
+app.include_router(issues_router)
 
 app.include_router(audit_router)
 

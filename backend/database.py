@@ -41,6 +41,7 @@ def restrict_project_scoped_queries(execute_state):
     from backend.models.site import Site
     from backend.models.sounding import Sounding
     from backend.models.transfer import FuelTransfer
+    from backend.models.issue import FuelIssue
     from backend.models.transfer_attachment import TransferAttachment
     from backend.models.vessel import Vessel
 
@@ -88,6 +89,11 @@ def restrict_project_scoped_queries(execute_state):
             FuelTransfer,
             FuelTransfer.from_vessel_id.in_(vessel_ids)
             & FuelTransfer.to_vessel_id.in_(vessel_ids),
+            include_aliases=True,
+        ),
+        with_loader_criteria(
+            FuelIssue,
+            FuelIssue.shift_id.in_(shift_ids),
             include_aliases=True,
         ),
         with_loader_criteria(

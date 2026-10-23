@@ -330,6 +330,22 @@ class EngineEventAdminTests(unittest.TestCase):
         self.assertEqual(self.linked.quantity, Decimal("20.000"))
         self.assertEqual(self.db.deleted, [])
 
+    def test_admin_event_changes_reconcile_successor_shifts_when_confirmed(self):
+        with patch.object(FuelService, "has_later_shift", return_value=True), \
+             patch.object(FuelService, "recalculate_shift"), \
+             patch.object(FuelService, "reconcile_downstream_shifts") as reconcile:
+            EngineService.update_engine_event(
+                self.db, event_id=55, shift_id=8, equipment_id=4,
+                start_time=self.start, stop_time=self.stop,
+                lph_rate=Decimal("15"), consumption=Decimal("30"),
+                corrected_by_user_id=1, reason="Corrected engine entry",
+                reconcile_downstream=True,
+            )
+        reconcile.assert_called_once_with(
+            self.db, shift_id=8, reconciled_by_user_id=1,
+            reason="Corrected engine entry",
+        )
+
     def test_missing_duplicate_or_inconsistent_linked_transaction_is_rejected(self):
         update_args = {
             "event_id": 55,

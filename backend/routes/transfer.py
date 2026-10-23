@@ -582,6 +582,7 @@ def admin_correct_transfer(
                 received_quantity=data.received_quantity,
                 notes=data.notes,
                 correction_reason=data.reason.strip(),
+                reconcile_downstream=data.reconcile_downstream,
             )
         else:
             raise ValueError(

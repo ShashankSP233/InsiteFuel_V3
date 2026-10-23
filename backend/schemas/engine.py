@@ -18,6 +18,7 @@ class EngineEventCreate(BaseModel):
         default=None,
         max_length=500,
     )
+    reconcile_downstream: bool = False
 
 
 class EngineEventResponse(BaseModel):
@@ -50,7 +51,9 @@ class EngineEventAdminUpdate(BaseModel):
     consumption: Decimal | None = Field(default=None, gt=0)
     remarks: str | None = Field(default=None, max_length=500)
     reason: str = Field(min_length=1, max_length=1000)
+    reconcile_downstream: bool = False
 
 
 class EngineEventDeleteRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
+    reconcile_downstream: bool = False

@@ -70,6 +70,7 @@ class AdminAdjustmentCorrection(BaseModel):
     quantity: Decimal = Field(gt=0)
     direction: Literal["IN", "OUT"]
     reason: str = Field(min_length=1, max_length=1000)
+    reconcile_downstream: bool = False
 
 
 class AdminReceiptCorrection(BaseModel):
@@ -78,6 +79,7 @@ class AdminReceiptCorrection(BaseModel):
     fuel_source: str | None = Field(default=None, max_length=200)
     remarks: str | None = Field(default=None, max_length=500)
     reason: str = Field(min_length=1, max_length=1000)
+    reconcile_downstream: bool = False
 
 
 class ShiftResponse(BaseModel):
@@ -107,6 +109,7 @@ class ShiftBalanceResponse(BaseModel):
     transfer_in: Decimal
     engine_consumption: Decimal
     transfer_out: Decimal
+    issue_out: Decimal
     adjustment_in: Decimal
     adjustment_out: Decimal
     closing_fuel: Decimal

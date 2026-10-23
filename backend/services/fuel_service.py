@@ -375,6 +375,7 @@ class FuelService:
         transfer_in = Decimal("0")
         engine_consumption = Decimal("0")
         transfer_out = Decimal("0")
+        issue_out = Decimal("0")
         adjustment_in = Decimal("0")
         adjustment_out = Decimal("0")
 
@@ -392,6 +393,9 @@ class FuelService:
 
             elif transaction.transaction_type == FuelTransactionType.TRANSFER_OUT.value:
                 transfer_out += quantity
+
+            elif transaction.transaction_type == FuelTransactionType.ISSUE_OUT.value:
+                issue_out += quantity
 
             elif transaction.transaction_type == FuelTransactionType.ADJUSTMENT.value:
                 if transaction.adjustment_direction == AdjustmentDirection.IN.value:
@@ -419,6 +423,7 @@ class FuelService:
             + transfer_in
             - engine_consumption
             - transfer_out
+            - issue_out
             + adjustment_in
             - adjustment_out
         )
@@ -429,6 +434,7 @@ class FuelService:
             "transfer_in": transfer_in,
             "engine_consumption": engine_consumption,
             "transfer_out": transfer_out,
+            "issue_out": issue_out,
             "adjustment_in": adjustment_in,
             "adjustment_out": adjustment_out,
             "closing_fuel": closing_fuel,
@@ -456,6 +462,76 @@ class FuelService:
         return shift
 
     @staticmethod
+    def reconcile_downstream_shifts(
+        db: Session,
+        *,
+        shift_id: int,
+        reconciled_by_user_id: int,
+        reason: str,
+    ) -> list[dict[str, str | int | None]]:
+        """Recalculate later shifts from the selected shift's current ledger balance."""
+        shift_hint = db.get(Shift, shift_id)
+        if shift_hint is None:
+            raise ValueError("Shift not found.")
+        shifts = FuelService.lock_vessel_shifts(db, shift_hint.vessel_id)
+        source = next((item for item in shifts if item.id == shift_id), None)
+        if source is None:
+            raise ValueError("Shift not found.")
+
+        source_balance = FuelService.calculate_shift_balance(db, source.id)
+        if source_balance["closing_fuel"] < 0:
+            raise ValueError("Correction would make the source shift closing balance negative.")
+        source.calculated_closing_fuel = source_balance["closing_fuel"]
+        later_shifts = sorted(
+            (item for item in shifts if FuelService.is_later_shift(item, source)),
+            key=FuelService.shift_order_key,
+        )
+        changes: list[dict[str, str | int | None]] = []
+        previous = source
+        for later in later_shifts:
+            old_opening = Decimal(str(later.opening_fuel))
+            old_closing = (
+                Decimal(str(later.calculated_closing_fuel))
+                if later.calculated_closing_fuel is not None else None
+            )
+            later.opening_fuel = Decimal(str(previous.calculated_closing_fuel))
+            balance = FuelService.calculate_shift_balance(db, later.id)
+            if balance["closing_fuel"] < 0:
+                raise ValueError(
+                    f"Downstream Shift #{later.id} would have negative closing fuel. Reconcile its transactions first."
+                )
+            later.calculated_closing_fuel = balance["closing_fuel"]
+            change = {
+                "shift_id": later.id,
+                "old_opening_fuel": str(old_opening),
+                "new_opening_fuel": str(later.opening_fuel),
+                "old_closing_fuel": str(old_closing) if old_closing is not None else None,
+                "new_closing_fuel": str(later.calculated_closing_fuel),
+            }
+            changes.append(change)
+            AuditService.log(
+                db=db,
+                user_id=reconciled_by_user_id,
+                action="RECONCILE_DOWNSTREAM_SHIFT_FUEL",
+                entity="shifts",
+                entity_id=later.id,
+                old_values={
+                    "opening_fuel": change["old_opening_fuel"],
+                    "calculated_closing_fuel": change["old_closing_fuel"],
+                },
+                new_values={
+                    "opening_fuel": change["new_opening_fuel"],
+                    "calculated_closing_fuel": change["new_closing_fuel"],
+                    "source_shift_id": source.id,
+                },
+                reason=reason.strip(),
+                details="Opening and closing fuel recalculated after a shift fuel correction.",
+            )
+            previous = later
+        db.flush()
+        return changes
+
+    @staticmethod
     def add_transaction(
         db: Session,
         vessel_id: int,
@@ -470,6 +546,7 @@ class FuelService:
         remarks: str | None = None,
         source_vessel_id: int | None = None,
         fuel_source: str | None = None,
+        allow_downstream_reconciliation: bool = False,
     ) -> FuelTransaction:
         """
         Add a fuel ledger transaction to a vessel shift.
@@ -534,7 +611,7 @@ class FuelService:
             raise ValueError(
                 "Fuel transactions cannot be added to a closed shift."
             )
-        if FuelService.has_later_shift(db, shift):
+        if FuelService.has_later_shift(db, shift) and not allow_downstream_reconciliation:
             raise ValueError(
                 "Fuel transactions cannot be added to a shift while later "
                 "shifts exist; downstream reconciliation is required first."
@@ -627,6 +704,7 @@ class FuelService:
         remarks: str | None,
         corrected_by_user_id: int,
         reason: str,
+        reconcile_downstream: bool = False,
     ) -> FuelTransaction:
         transaction_hint = db.get(FuelTransaction, transaction_id)
         if transaction_hint is None:
@@ -698,7 +776,8 @@ class FuelService:
             raise ValueError("Receipt correction does not change any values.")
 
         has_later_shift = FuelService.has_later_shift(db, shift)
-        if has_later_shift and Decimal(str(transaction.quantity)) != new_quantity:
+        changed_quantity = Decimal(str(transaction.quantity)) != new_quantity
+        if has_later_shift and changed_quantity and not reconcile_downstream:
             raise ValueError(
                 "Receipt quantity cannot be changed while later shifts exist; "
                 "downstream reconciliation is required first."
@@ -718,6 +797,11 @@ class FuelService:
         transaction.fuel_source = normalized_fuel_source
         transaction.remarks = normalized_remarks
         FuelService.recalculate_shift(db, shift.id)
+        if has_later_shift and changed_quantity:
+            FuelService.reconcile_downstream_shifts(
+                db, shift_id=shift.id, reconciled_by_user_id=corrected_by_user_id,
+                reason=reason,
+            )
 
         AuditService.log(
             db=db,
@@ -799,6 +883,7 @@ class FuelService:
         engine_event_id: int,
         created_by_user_id: int,
         remarks: str | None = None,
+        allow_downstream_reconciliation: bool = False,
     ) -> FuelTransaction:
         return FuelService.add_transaction(
             db=db,
@@ -811,6 +896,7 @@ class FuelService:
             reference_type="ENGINE_EVENT",
             reference_id=engine_event_id,
             remarks=remarks,
+            allow_downstream_reconciliation=allow_downstream_reconciliation,
         )
 
     @staticmethod
@@ -1412,6 +1498,7 @@ class FuelService:
         new_direction: AdjustmentDirection,
         corrected_by_user_id: int,
         correction_remarks: str,
+        reconcile_downstream: bool = False,
     ) -> FuelTransaction:
         """
         Correct an adjustment without modifying historical ledger entries.
@@ -1506,7 +1593,8 @@ class FuelService:
                 "Corrected adjustment is identical to the current adjustment."
             )
 
-        if FuelService.has_later_shift(db, shift):
+        has_later_shift = FuelService.has_later_shift(db, shift)
+        if has_later_shift and not reconcile_downstream:
             raise ValueError(
                 "This correction would change fuel available to subsequent shifts; "
                 "downstream reconciliation is required first."
@@ -1555,6 +1643,12 @@ class FuelService:
             db,
             current.shift_id,
         )
+        if has_later_shift:
+            FuelService.reconcile_downstream_shifts(
+                db, shift_id=current.shift_id,
+                reconciled_by_user_id=corrected_by_user_id,
+                reason=correction_remarks,
+            )
 
         # Record the correction in the audit log.
         AuditService.log(

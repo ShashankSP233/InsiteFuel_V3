@@ -689,6 +689,7 @@ class TransferService:
         manager_remark: str | None = None,
         notes: str | None = None,
         correction_reason: str | None = None,
+        reconcile_downstream: bool = False,
     ):
         transfer = db.get(FuelTransfer, transfer_id)
 
@@ -772,13 +773,11 @@ class TransferService:
                 "Destination shift does not belong to destination vessel."
             )
 
-        if (
-            new_initiated != current_initiated
-            or new_received != current_received
-        ) and (
-            FuelService.has_later_shift(db, from_shift)
-            or FuelService.has_later_shift(db, to_shift)
-        ):
+        source_changed = new_initiated != current_initiated
+        destination_changed = new_received != current_received
+        source_has_later = FuelService.has_later_shift(db, from_shift)
+        destination_has_later = FuelService.has_later_shift(db, to_shift)
+        if (source_changed and source_has_later or destination_changed and destination_has_later) and not reconcile_downstream:
             raise ValueError(
                 "This correction would change fuel available to subsequent shifts; "
                 "downstream reconciliation is required first."
@@ -968,6 +967,18 @@ class TransferService:
             db,
             to_shift.id,
         )
+        if source_changed and source_has_later:
+            FuelService.reconcile_downstream_shifts(
+                db, shift_id=from_shift.id,
+                reconciled_by_user_id=corrected_by_user_id,
+                reason=correction_reason or f"Correct transfer #{transfer.id}",
+            )
+        if destination_changed and destination_has_later:
+            FuelService.reconcile_downstream_shifts(
+                db, shift_id=to_shift.id,
+                reconciled_by_user_id=corrected_by_user_id,
+                reason=correction_reason or f"Correct transfer #{transfer.id}",
+            )
 
         AuditService.log(
             db=db,
@@ -1015,6 +1026,3 @@ class TransferService:
         db.flush()
 
         return transfer
-
-
-    

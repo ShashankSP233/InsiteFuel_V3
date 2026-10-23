@@ -34,6 +34,7 @@ class ExportService:
         ("DG Hours", "dg_hours"),
         ("Total Engine Consumption (L)", "total_engine_consumption"),
         ("Transfer Out (L)", "transfer_out"),
+        ("Fuel Issues Out (L)", "issue_out"),
         ("Adjustment In (L)", "adjustment_in"),
         ("Adjustment Out (L)", "adjustment_out"),
         ("Closing Fuel (L)", "closing_fuel"),

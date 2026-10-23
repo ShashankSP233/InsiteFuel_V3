@@ -208,6 +208,7 @@ async function init() {
   ["shiftDate", "productionDate", "soundingDate", "dashTo", "transferDate", "adminShiftFrom", "adminShiftTo"].forEach(
     (id) => ($(id).value = today()),
   );
+  if ($("issueDate")) $("issueDate").value = today();
   $("transferReportFrom").value = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
   $("transferReportTo").value = today();
   if ($("chartFrom")) {
@@ -313,6 +314,8 @@ async function loadMaster() {
   }
   select("transferFrom", vessels);
   select("transferTo", vessels);
+  select("issueSourceVessel", vessels);
+  $("issueSourceVessel").insertAdjacentHTML("afterbegin", '<option value="" selected>Select source vessel</option>');
   $("transferReportVessel").innerHTML = '<option value="">All vessels</option>' +
     vessels.map((vessel) => `<option value="${vessel.id}">${esc(vessel.name)}</option>`).join("");
   populateFuelSources();
@@ -584,6 +587,7 @@ async function loadShiftReport() {
         "Transfer in",
         "Engine use",
         "Transfer out",
+        "Issued out",
         "Adjustments",
         "Advancement",
         "Dredging hours",
@@ -596,6 +600,7 @@ async function loadShiftReport() {
           litres(b.transfer_in),
           litres(b.engine_consumption),
           litres(b.transfer_out),
+          litres(b.issue_out),
           `${litres(b.adjustment_in)} / ${litres(b.adjustment_out)}`,
           activeShift.advancement_m == null ? "—" : f(activeShift.advancement_m),
           activeShift.dredging_hours == null ? "—" : f(activeShift.dredging_hours),
@@ -621,6 +626,8 @@ async function loadShiftReport() {
         details = "Transfer In";
       } else if (t.transaction_type === "TRANSFER_OUT") {
         details = "Transfer Out";
+      } else if (t.transaction_type === "ISSUE_OUT") {
+        details = "Issue to untracked vessel";
       } else if (t.transaction_type === "ADJUSTMENT") {
         details =
           t.adjustment_direction === "IN" ? "Adjustment In" : "Adjustment Out";
@@ -1192,10 +1199,87 @@ async function exportTransferReport() {
 function showTransferView(view) {
   if (view === "report" && me?.role !== "ADMIN") return;
   $("transferRegisterView").classList.toggle("hidden", view !== "register");
+  $("transferIssuesView").classList.toggle("hidden", view !== "issues");
   $("transferReportView").classList.toggle("hidden", view !== "report");
   document.querySelectorAll("[data-transfer-view]").forEach((button) =>
     button.classList.toggle("active", button.dataset.transferView === view));
   if (view === "report") loadTransferReport().catch((error) => message(error.message, "error"));
+  if (view === "issues") loadFuelIssues().catch((error) => message(error.message, "error"));
+}
+
+async function resolveIssueShift() {
+  const vesselId = n($("issueSourceVessel").value);
+  const shiftDate = $("issueDate").value || today();
+  if (!vesselId) throw Error("Select the source vessel.");
+  const chosenShift = $("issueShift").value;
+  const shift = chosenShift
+    ? await getTransferShift(vesselId, shiftDate, chosenShift)
+    : await getCurrentTransferShift(vesselId, shiftDate);
+  if (shift.status !== "OPEN") throw Error("Select an open source shift.");
+  return shift;
+}
+
+async function refreshIssueShift() {
+  try {
+    const shift = await resolveIssueShift();
+    $("issueShiftInfo").textContent = `Issue will be recorded against ${shift.shift_name} shift #${shift.id} (${shift.shift_date}).`;
+  } catch (error) {
+    $("issueShiftInfo").textContent = error.message;
+  }
+}
+
+async function createFuelIssue() {
+  try {
+    const shift = await resolveIssueShift();
+    const receivingVessel = $("issueReceivingVessel").value.trim();
+    const quantity = $("issueQuantity").value;
+    if (!receivingVessel) throw Error("Enter the receiving vessel name.");
+    if (!(Number(quantity) > 0)) throw Error("Quantity must be greater than zero.");
+    await api("/api/issues", {
+      method: "POST",
+      body: JSON.stringify({
+        vessel_id: n($("issueSourceVessel").value),
+        shift_id: shift.id,
+        receiving_vessel: receivingVessel,
+        quantity: String(quantity),
+        notes: $("issueNotes").value.trim() || null,
+      }),
+    });
+    message("Issue submitted for administrator approval.", "success");
+    $("issueReceivingVessel").value = "";
+    $("issueQuantity").value = "";
+    $("issueNotes").value = "";
+    await loadFuelIssues();
+  } catch (error) { message(error.message, "error"); }
+}
+
+async function reviewFuelIssue(id, decision) {
+  try {
+    if (decision === "approve" && !confirm("Approve this issue? If the source shift has later shifts, their opening and closing balances will be recalculated from this issue onward. Recorded transactions will stay unchanged, and approval will be blocked if a later shift would go below zero.")) return;
+    const remark = prompt(decision === "approve" ? "Admin remark (optional):" : "Reason for rejection:");
+    if (remark === null) return;
+    if (decision === "reject" && !remark.trim()) throw Error("A rejection reason is required.");
+    await api(`/api/issues/${id}/${decision}`, {
+      method: "POST",
+      body: JSON.stringify({ admin_remark: remark.trim() || null, reconcile_downstream: decision === "approve" }),
+    });
+    message(decision === "approve"
+      ? "Issue approved; downstream shifts reconciled where needed."
+      : "Issue rejected.", "success");
+    await loadFuelIssues();
+  } catch (error) { message(error.message, "error"); }
+}
+
+async function loadFuelIssues() {
+  const rows = await api("/api/issues");
+  table("fuelIssueList", ["ID", "Source", "Shift", "Receiving vessel", "Quantity (L)", "Notes", "Status", "Admin remark", "Actions"], rows.map((row) => [
+    row.id, esc(chartVesselName(row.vessel_id)), row.shift_id,
+    esc(row.receiving_vessel), litres(row.quantity), esc(row.notes || "—"),
+    esc(row.status), esc(row.admin_remark || "—"),
+    row.status === "PENDING" && me?.role === "ADMIN"
+      ? `<button class="btn btn-sm" onclick="reviewFuelIssue(${row.id},'approve')">Approve &amp; Reconcile</button> <button class="btn btn-sm" onclick="reviewFuelIssue(${row.id},'reject')">Reject</button>`
+      : "—",
+  ]));
 }
 async function saveProduction() {
   try {
@@ -1791,6 +1875,7 @@ async function loadDashboard() {
       ["Received", d.total_received, true],
       ["Consumption", d.total_consumption, true],
       ["Transfer out", d.total_transfer_out, true],
+      ["Issued to untracked vessels", d.total_issue_out, true],
       ["Advancement", d.total_advancement_m, false],
       ["Dredging hours", d.total_dredging_hours, false],
     ]
@@ -1810,6 +1895,7 @@ async function loadDashboard() {
         "Transfer In",
         "Engine",
         "Transfer Out",
+        "Fuel Issues Out",
         "Closing",
         "Advancement",
         "Dredging Hours",
@@ -1824,6 +1910,7 @@ async function loadDashboard() {
         litres(x.transfer_in),
         litres(x.total_engine_consumption),
         litres(x.transfer_out),
+        litres(x.issue_out),
         litres(x.closing_fuel),
         x.advancement_m == null ? "—" : f(x.advancement_m),
         x.dredging_hours == null ? "—" : f(x.dredging_hours),
@@ -5424,6 +5511,7 @@ async function saveAdminEngineEvent() {
       lph_rate: Number((consumption / hours).toFixed(3)),
       consumption,
       remarks: $("adminEngineRemarks").value.trim() || null,
+      reconcile_downstream: true,
     };
     let successMessage;
     if (adminEditingEngineEventId !== null) {
@@ -5446,7 +5534,8 @@ async function saveAdminEngineEvent() {
         `Stop: ${formatDateTime(oldEvent.stop_time)} → ${formatDateTime(stop.toISOString())}\n` +
         `Consumption: ${oldEvent.consumption} L → ${consumption} L\n` +
         `Remarks: ${oldEvent.remarks || "—"} → ${$("adminEngineRemarks").value.trim() || "—"}\n\n` +
-        `Reason: ${reason}`,
+        `Reason: ${reason}\n\n` +
+        `If later shifts exist, their opening and closing fuel will be recalculated. Recorded transactions remain unchanged; the correction will be blocked if a later shift would become negative.`,
       )) return;
       payload.reason = reason;
       await api(
@@ -5455,6 +5544,7 @@ async function saveAdminEngineEvent() {
       );
       successMessage = "Engine event correction saved.";
     } else {
+      if (!confirm("Add this engine event? If later shifts exist, their opening and closing fuel will be recalculated. Recorded transactions remain unchanged; the event will be blocked if a later shift would become negative.")) return;
       payload.shift_id = adminSelectedShift.id;
       await api(`/api/engine/shift/${adminSelectedShift.id}/events`, {
         method: "POST",
@@ -5483,11 +5573,11 @@ async function deleteAdminEngineEvent(eventId) {
     const reason = prompt(`Correction reason for deleting engine event #${event.id}:`);
     if (reason === null) return;
     if (!reason.trim()) throw Error("Enter a correction reason.");
-    if (!confirm(`Delete engine event #${event.id}?\n\nReason: ${reason.trim()}`)) return;
+    if (!confirm(`Delete engine event #${event.id}?\n\nReason: ${reason.trim()}\n\nIf later shifts exist, their opening and closing fuel will be recalculated. Recorded transactions remain unchanged; the deletion will be blocked if a later shift would become negative.`)) return;
 
     await api(`/api/engine/shift/${adminSelectedShift.id}/events/${event.id}`, {
       method: "DELETE",
-      body: JSON.stringify({ reason: reason.trim() }),
+      body: JSON.stringify({ reason: reason.trim(), reconcile_downstream: true }),
     });
     await viewAdminShift(adminSelectedShift.id);
     message("Engine event deleted.", "success");
@@ -5776,7 +5866,8 @@ async function correctAdminReceipt(transactionId) {
         `Quantity: ${transaction.quantity} L → ${quantity} L\n` +
         `Source: ${oldSource} → ${newSource}\n` +
         `Remarks: ${transaction.remarks || "—"} → ${remarks.trim() || "—"}\n\n` +
-        `Reason: ${reason.trim()}`,
+        `Reason: ${reason.trim()}\n\n` +
+        `If later shifts exist, their opening and closing fuel will be recalculated. Recorded transactions remain unchanged; the correction will be blocked if a later shift would become negative.`,
       )
     ) {
       return;
@@ -5790,10 +5881,11 @@ async function correctAdminReceipt(transactionId) {
         fuel_source: fuelSource.trim() || null,
         remarks: remarks.trim() || null,
         reason: reason.trim(),
+        reconcile_downstream: true,
       }),
     });
     await viewAdminShift(adminSelectedShift.id, true);
-    message("Receipt corrected; no later shift balances were changed.", "success");
+    message("Receipt corrected; downstream shifts reconciled where needed.", "success");
   } catch (e) {
     message(e.message, "error");
   }
@@ -5819,14 +5911,14 @@ async function correctAdminAdjustment(transactionId) {
     const reason = prompt("Correction reason:");
     if (reason === null) return;
     if (!reason.trim()) throw Error("Enter a correction reason.");
-    if (!confirm(`Correct adjustment #${transaction.id}?\n${transaction.adjustment_direction} ${transaction.quantity} L → ${normalizedDirection} ${parsedQuantity} L\n\nReason: ${reason.trim()}`)) return;
+    if (!confirm(`Correct adjustment #${transaction.id}?\n${transaction.adjustment_direction} ${transaction.quantity} L → ${normalizedDirection} ${parsedQuantity} L\n\nReason: ${reason.trim()}\n\nIf later shifts exist, their opening and closing fuel will be recalculated. Recorded transactions remain unchanged; the correction will be blocked if a later shift would become negative.`)) return;
 
     await api(`/api/fuel/admin/adjustments/${transaction.id}/correct`, {
       method: "POST",
-      body: JSON.stringify({ quantity: parsedQuantity, direction: normalizedDirection, reason: reason.trim() }),
+      body: JSON.stringify({ quantity: parsedQuantity, direction: normalizedDirection, reason: reason.trim(), reconcile_downstream: true }),
     });
     await viewAdminShift(adminSelectedShift.id);
-    message("Adjustment corrected using reversal and corrected ledger entries.", "success");
+    message("Adjustment corrected; downstream shifts reconciled where needed.", "success");
   } catch (e) {
     message(e.message, "error");
   }
@@ -5865,17 +5957,18 @@ async function correctAdminTransfer(transferId) {
       `Correct transfer #${transfer.id}?\n` +
       `Initiated / received: ${oldQuantities} → ${newQuantities}\n` +
       `Notes: ${transfer.notes || "—"} → ${notes.trim() || "—"}\n\n` +
-      `Reason: ${reason.trim()}`,
+      `Reason: ${reason.trim()}\n\n` +
+      `If this approved transfer changes fuel, later shifts for the affected vessels will be recalculated. Recorded transactions remain unchanged; the correction will be blocked if a later shift would become negative.`,
     )) return;
 
-    const payload = { initiated_quantity: initiated, notes, reason: reason.trim() };
+    const payload = { initiated_quantity: initiated, notes, reason: reason.trim(), reconcile_downstream: true };
     if (received !== null) payload.received_quantity = received;
     await api(`/api/transfers/admin/${transfer.id}/correct`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
     await viewAdminShift(adminSelectedShift.id);
-    message("Transfer corrected through the existing transfer accounting service.", "success");
+    message("Transfer corrected; downstream shifts reconciled where needed.", "success");
   } catch (e) {
     message(e.message, "error");
   }
@@ -7064,6 +7157,9 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
 document.querySelectorAll("[data-transfer-view]").forEach((button) =>
   button.addEventListener("click", () => showTransferView(button.dataset.transferView)),
 );
+$('issueSourceVessel').addEventListener("change", refreshIssueShift);
+$('issueDate').addEventListener("change", refreshIssueShift);
+$('issueShift').addEventListener("change", refreshIssueShift);
 $('changeOpeningFuelButton').addEventListener('click', changeOpeningFuel);
 $("shiftVessel").addEventListener("change", refreshShiftEquipment);
 $("transferFrom").addEventListener("change", refreshTransferShifts);

@@ -179,6 +179,7 @@ class DashboardService:
                     "transfer_out": Decimal(
                         str(balance["transfer_out"])
                     ),
+                    "issue_out": Decimal(str(balance["issue_out"])),
 
                     "adjustment_in": Decimal(
                         str(balance["adjustment_in"])
@@ -1538,5 +1539,3 @@ class DashboardService:
         return results
 
 
-
-    

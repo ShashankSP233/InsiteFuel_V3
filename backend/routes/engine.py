@@ -83,6 +83,7 @@ def admin_create_engine_event(
             created_by_user_id=current_user.id,
             consumption=data.consumption,
             remarks=data.remarks,
+            reconcile_downstream=data.reconcile_downstream,
         )
         db.commit()
         db.refresh(event)
@@ -119,6 +120,7 @@ def admin_update_engine_event(
             remarks=data.remarks,
             corrected_by_user_id=current_user.id,
             reason=data.reason,
+            reconcile_downstream=data.reconcile_downstream,
         )
         db.commit()
         db.refresh(event)
@@ -149,6 +151,7 @@ def admin_delete_engine_event(
             shift_id=shift_id,
             deleted_by_user_id=current_user.id,
             reason=data.reason,
+            reconcile_downstream=data.reconcile_downstream,
         )
         db.commit()
         return {"deleted": True, "event_id": event_id}

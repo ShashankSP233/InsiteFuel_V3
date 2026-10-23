@@ -442,6 +442,7 @@
 
           <div class="subtab-bar" role="tablist" aria-label="Transfers views">
             <button class="subtab-btn active" data-transfer-view="register">Transfer register</button>
+            <button class="subtab-btn" data-transfer-view="issues">Fuel issues</button>
             <button class="subtab-btn admin-only" data-transfer-view="report">Admin transfer report</button>
           </div>
 
@@ -526,6 +527,24 @@
             ></div>
           </div>
 
+          </div>
+
+          <div id="transferIssuesView" class="hidden">
+            <div class="card">
+              <div class="section-head"><span class="dot"></span>Issue fuel to an untracked vessel</div>
+              <div class="note">The issue is deducted from the source shift only after an administrator approves it. No balance or shift is created for the receiving vessel.</div>
+              <div class="grid">
+                <div><label>Source vessel</label><select id="issueSourceVessel"></select></div>
+                <div><label>Shift date</label><input id="issueDate" type="date" /></div>
+                <div><label>Shift</label><select id="issueShift"><option value="">Auto — Current Shift</option><option value="MORNING">Morning</option><option value="EVENING">Evening</option></select></div>
+                <div><label>Receiving vessel</label><input id="issueReceivingVessel" maxlength="200" /></div>
+                <div><label>Quantity (L)</label><input id="issueQuantity" type="number" min="0" step="0.001" /></div>
+                <div><label>Notes</label><input id="issueNotes" maxlength="1000" /></div>
+              </div>
+              <div id="issueShiftInfo" class="note">Select a source vessel to find its open shift.</div>
+              <button class="btn btn-primary mt8" onclick="createFuelIssue()">Submit issue for approval</button>
+            </div>
+            <div class="card"><div class="section-head"><span class="dot"></span>Fuel issue register</div><div id="fuelIssueList" class="table-wrap"></div></div>
           </div>
 
           <div id="transferReportView" class="hidden admin-only">

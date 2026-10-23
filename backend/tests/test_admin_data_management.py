@@ -446,6 +446,29 @@ class AdminDataManagementTests(unittest.TestCase):
             )
         self.assertEqual(blocked_db.added, [])
 
+    def test_adjustment_correction_reconciles_successors_when_confirmed(self):
+        original = SimpleNamespace(
+            id=17, shift_id=4, vessel_id=3,
+            transaction_type=FuelTransactionType.ADJUSTMENT.value,
+            adjustment_direction=AdjustmentDirection.IN.value,
+            reference_type=None, quantity=Decimal("8.000"),
+        )
+        shift = SimpleNamespace(id=4, vessel_id=3, status="OPEN", shift_date=date(2026, 10, 13))
+        db = FakeSession(records={(FuelTransaction, 17): original, (Shift, 4): shift},
+                         scalar_results=[original, 19])
+        with patch.object(FuelService, "recalculate_shift"), patch.object(
+            FuelService, "reconcile_downstream_shifts", return_value=[]
+        ) as reconcile:
+            FuelService.correct_adjustment(
+                db, adjustment_id=17, new_quantity=Decimal("6"),
+                new_direction=AdjustmentDirection.OUT, corrected_by_user_id=1,
+                correction_remarks="Correct adjustment", reconcile_downstream=True,
+            )
+        reconcile.assert_called_once_with(
+            db, shift_id=4, reconciled_by_user_id=1,
+            reason="Correct adjustment",
+        )
+
     def test_opening_correction_is_audited_when_no_successors_exist(self):
         shift = SimpleNamespace(
             id=4,
@@ -734,6 +757,30 @@ class AdminDataManagementTests(unittest.TestCase):
             )
         self.assertEqual(receipt.quantity, Decimal("2"))
 
+    def test_receipt_correction_reconciles_successors_when_confirmed(self):
+        receipt = SimpleNamespace(
+            id=64, shift_id=4, vessel_id=3,
+            transaction_type=FuelTransactionType.RECEIPT.value,
+            reference_type=None, reference_id=None, quantity=Decimal("2"),
+            source_vessel_id=None, fuel_source=None,
+            transaction_date=datetime(2026, 10, 13, tzinfo=timezone.utc), remarks=None,
+        )
+        shift = SimpleNamespace(id=4, vessel_id=3, status="OPEN", shift_date=date(2026, 10, 13))
+        db = ReceiptSession(records={(FuelTransaction, 64): receipt, (Shift, 4): shift},
+                            scalar_results=[receipt, 9])
+        with patch.object(FuelService, "calculate_shift_balance",
+                          return_value={"closing_fuel": Decimal("100")}), \
+             patch.object(FuelService, "recalculate_shift"), \
+             patch.object(FuelService, "reconcile_downstream_shifts", return_value=[]) as reconcile:
+            FuelService.correct_admin_receipt(
+                db, transaction_id=64, quantity=Decimal("3"), source_vessel_id=None,
+                fuel_source=None, remarks=None, corrected_by_user_id=1,
+                reason="Correct receipt", reconcile_downstream=True,
+            )
+        reconcile.assert_called_once_with(
+            db, shift_id=4, reconciled_by_user_id=1, reason="Correct receipt",
+        )
+
     def test_rejected_receipt_route_rolls_back_without_commit(self):
         db = Mock()
         data = AdminReceiptCorrection(
@@ -876,6 +923,47 @@ class AdminDataManagementTests(unittest.TestCase):
                 manager_remark="Correction",
             )
         self.assertEqual(db.added, [])
+
+    def test_approved_transfer_correction_can_reconcile_both_vessels(self):
+        transfer = SimpleNamespace(
+            id=41, status=TransferStatus.BALANCES_UPDATED.value,
+            from_shift_id=4, from_vessel_id=3, to_shift_id=7, to_vessel_id=8,
+            initiated_quantity=Decimal("50"), received_quantity=Decimal("48"),
+            loss_quantity=Decimal("2"), manager_remark=None, notes=None,
+        )
+        source_shift = SimpleNamespace(id=4, vessel_id=3, shift_date=date(2026, 10, 13))
+        destination_shift = SimpleNamespace(id=7, vessel_id=8, shift_date=date(2026, 10, 13))
+        source_tx = SimpleNamespace(
+            id=51, shift_id=4, vessel_id=3,
+            transaction_type=FuelTransactionType.TRANSFER_OUT.value,
+            quantity=Decimal("50"),
+        )
+        destination_tx = SimpleNamespace(
+            id=52, shift_id=7, vessel_id=8,
+            transaction_type=FuelTransactionType.TRANSFER_IN.value,
+            quantity=Decimal("48"),
+        )
+        db = TransferSession(
+            records={(FuelTransfer, 41): transfer, (Shift, 4): source_shift,
+                     (Shift, 7): destination_shift},
+            query_first_results=[source_tx, destination_tx],
+            scalar_value=99,
+        )
+        with patch.object(
+            FuelService, "calculate_shift_balance",
+            side_effect=[{"closing_fuel": Decimal("100")}, {"closing_fuel": Decimal("20")}],
+        ), patch.object(FuelService, "recalculate_shift"), patch.object(
+            FuelService, "reconcile_downstream_shifts", return_value=[]
+        ) as reconcile:
+            TransferService.correct_approved_transfer(
+                db, transfer_id=41, corrected_by_user_id=1,
+                initiated_quantity=Decimal("60"), received_quantity=Decimal("52"),
+                correction_reason="Fix transfer", reconcile_downstream=True,
+            )
+        self.assertEqual(reconcile.call_count, 2)
+        self.assertEqual(
+            {call.kwargs["shift_id"] for call in reconcile.call_args_list}, {4, 7}
+        )
 
 
 if __name__ == "__main__":

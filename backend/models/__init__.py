@@ -15,6 +15,7 @@ from backend.models.shift_attachments import ShiftAttachment
 from backend.models.site import Site
 from backend.models.transfer_attachment import TransferAttachment
 from backend.models.iot import IotPayload
+from backend.models.issue import FuelIssue, IssueStatus
 
 __all__ = [
     "User",
@@ -36,4 +37,6 @@ __all__ = [
     "Site",
     "TransferAttachment",
     "IotPayload",
+    "FuelIssue",
+    "IssueStatus",
 ]
