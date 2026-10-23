@@ -10,7 +10,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
     SimpleDocTemplate,
-    Table,
+    LongTable,
     TableStyle,
     Paragraph,
 )
@@ -227,14 +227,14 @@ class ExportService:
             "FuelDashboardHeader",
             parent=styles["Normal"],
             fontName="Helvetica-Bold",
-            fontSize=6,
-            leading=7,
+            fontSize=8,
+            leading=9,
         )
         table_cell_style = ParagraphStyle(
             "FuelDashboardCell",
             parent=styles["Normal"],
-            fontSize=6,
-            leading=7,
+            fontSize=8,
+            leading=9,
         )
 
         title = Paragraph(
@@ -254,10 +254,12 @@ class ExportService:
                 ]
             )
 
-        table = Table(
+        table = LongTable(
             data,
             repeatRows=1,
             colWidths=[52, 110, 58, 75, 75, 75, 75, 60, 75, 60, 75, 60, 85, 75, 75],
+            splitByRow=1,
+            splitInRow=1,
         )
 
         table.setStyle(
@@ -285,7 +287,7 @@ class ExportService:
                         "FONTSIZE",
                         (0, 0),
                         (-1, -1),
-                        6,
+                        8,
                     ),
                     (
                         "GRID",
