@@ -14,7 +14,13 @@ router = APIRouter(prefix="/api/issues", tags=["Fuel issues"])
 
 @router.post("", response_model=FuelIssueResponse, status_code=status.HTTP_201_CREATED)
 def create_issue(data: FuelIssueCreate, db: Session = Depends(get_db),
-                 current_user: User = Depends(get_current_user)):
+                 current_user: User = Depends(
+                     require_roles(
+                         UserRole.ADMIN,
+                         UserRole.MANAGER,
+                         UserRole.OPERATOR,
+                     )
+                 )):
     try:
         issue = IssueService.create(db, vessel_id=data.vessel_id, shift_id=data.shift_id,
                                     receiving_vessel=data.receiving_vessel,

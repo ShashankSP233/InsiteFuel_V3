@@ -1230,6 +1230,9 @@ async function refreshIssueShift() {
 
 async function createFuelIssue() {
   try {
+    if (!me || !["OPERATOR", "MANAGER", "ADMIN"].includes(me.role)) {
+      throw Error("You do not have permission to submit fuel issues.");
+    }
     const shift = await resolveIssueShift();
     const receivingVessel = $("issueReceivingVessel").value.trim();
     const quantity = $("issueQuantity").value;
@@ -7140,7 +7143,10 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
       .forEach((x) => x.classList.remove("active"));
     b.classList.add("active");
     try {
-      if (b.dataset.page === "transfers") await loadTransfers();
+      if (b.dataset.page === "transfers") {
+        await loadTransfers();
+        if (me.role === "OPERATOR") showTransferView("issues");
+      }
       if (b.dataset.page === "production") await loadProduction();
       if (b.dataset.page === "soundings") await loadSoundingShift();
       if (b.dataset.page === "dashboard") await loadDashboard();
