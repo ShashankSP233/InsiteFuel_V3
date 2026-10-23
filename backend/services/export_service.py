@@ -1,5 +1,6 @@
 from io import BytesIO, StringIO
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import date, datetime
 import csv
 
 from openpyxl import Workbook
@@ -127,6 +128,12 @@ class ExportService:
         return str(value)
 
     @staticmethod
+    def _format_pdf_value(value):
+        if isinstance(value, (date, datetime)):
+            return value.strftime("%d-%m-%y")
+        return ExportService._format_value(value)
+
+    @staticmethod
     def create_csv(rows: list[dict]) -> BytesIO:
         output = StringIO()
 
@@ -249,7 +256,7 @@ class ExportService:
         for row in rows:
             data.append(
                 [
-                    Paragraph(ExportService._format_value(row[field]), table_cell_style)
+                    Paragraph(ExportService._format_pdf_value(row[field]), table_cell_style)
                     for _, field in ExportService.PDF_COLUMNS
                 ]
             )
@@ -257,7 +264,7 @@ class ExportService:
         table = LongTable(
             data,
             repeatRows=1,
-            colWidths=[52, 110, 58, 75, 75, 75, 75, 60, 75, 60, 75, 60, 85, 75, 75],
+            colWidths=[66, 104, 58, 75, 75, 75, 75, 60, 75, 60, 75, 60, 85, 75, 75],
             splitByRow=1,
             splitInRow=1,
         )
