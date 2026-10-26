@@ -83,6 +83,12 @@ def get_fuel_dashboard(
         (row["total_engine_consumption"] for row in rows),
         Decimal("0"),
     )
+    days_with_shifts = len({row["shift_date"] for row in rows})
+    average_daily_consumption = (
+        total_consumption / Decimal(days_with_shifts)
+        if days_with_shifts
+        else Decimal("0")
+    )
 
     total_transfer_out = sum(
         (row["transfer_out"] for row in rows),
@@ -145,6 +151,7 @@ def get_fuel_dashboard(
         total_received=total_received,
         total_transfer_in=total_transfer_in,
         total_consumption=total_consumption,
+        average_daily_consumption=average_daily_consumption,
         total_transfer_out=total_transfer_out,
         total_issue_out=total_issue_out,
         total_advancement_m=total_advancement_m,

@@ -1905,6 +1905,7 @@ async function loadDashboard() {
       ["Received", d.total_received, true],
       ["Transfer in", d.total_transfer_in, true],
       ["Consumption", d.total_consumption, true],
+      ["Avg. fuel consumption / day", d.average_daily_consumption, true],
       ["Transfer out", d.total_transfer_out, true],
       ["Issued to untracked vessels", d.total_issue_out, true],
       ["Advancement", d.total_advancement_m, false],

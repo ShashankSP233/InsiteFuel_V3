@@ -51,6 +51,7 @@ class FuelDashboardResponse(BaseModel):
     total_received: Decimal
     total_transfer_in: Decimal
     total_consumption: Decimal
+    average_daily_consumption: Decimal
     total_transfer_out: Decimal
     total_issue_out: Decimal
     total_advancement_m: Decimal
