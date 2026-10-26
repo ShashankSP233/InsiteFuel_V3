@@ -70,6 +70,12 @@ function formatDateTime(value) {
   return d.toLocaleString();
 }
 
+function formatDateOnly(value) {
+  if (!value) return "-";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+}
+
 function fmt(value) {
   const n = Number(value ?? 0);
 
@@ -1171,8 +1177,8 @@ async function loadTransferReport() {
   if (me?.role !== "ADMIN") throw Error("Only an administrator can view transfer reports.");
   const rows = await api(`/api/transfers/admin/report?${transferReportQuery()}`);
   $("transferReportStatusMessage").textContent = `${rows.length} transfer${rows.length === 1 ? "" : "s"} found.`;
-  table("transferReportList", ["ID", "From", "To", "Date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark", "Actions"], rows.map((row) => [
-    row.id, esc(row.from_vessel), esc(row.to_vessel), formatDateTime(row.transfer_date),
+  table("transferReportList", ["ID", "From", "To", "Shift date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark", "Actions"], rows.map((row) => [
+    row.id, esc(row.from_vessel), esc(row.to_vessel), formatDateOnly(row.shift_date),
     litres(row.initiated_quantity), litres(row.received_quantity), litres(row.loss_quantity),
     esc(row.status), esc(row.notes || "—"), esc(row.manager_remark || "—"),
     row.status === "BALANCES_UPDATED" && ["MISSING", "PARTIAL"].includes(row.ledger_state)

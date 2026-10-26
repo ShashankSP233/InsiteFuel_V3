@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import date, datetime, time, timedelta
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -13,7 +13,6 @@ from backend.models.fuel import FuelTransaction
 from backend.models.shift import Shift
 from backend.models.transfer import FuelTransfer, TransferStatus
 from backend.models.vessel import Vessel
-from backend.utils.time import IST
 from backend.models.user import User, UserRole
 from backend.schemas.transfer import (
     AdminTransferCorrection,
@@ -273,14 +272,20 @@ def _admin_transfer_rows(
     transfer_status: str | None,
     vessel_id: int | None,
 ):
-    statement = select(FuelTransfer)
+    # The transfer timestamp records when it was entered in the system. The
+    # report is operational, so date filtering and display use the source
+    # shift's date instead.
+    statement = (
+        select(FuelTransfer, Shift.shift_date.label("shift_date"))
+        .join(Shift, Shift.id == FuelTransfer.from_shift_id)
+    )
     if from_date:
         statement = statement.where(
-            FuelTransfer.transfer_date >= datetime.combine(from_date, time.min, tzinfo=IST)
+            Shift.shift_date >= from_date
         )
     if to_date:
         statement = statement.where(
-            FuelTransfer.transfer_date < datetime.combine(to_date + timedelta(days=1), time.min, tzinfo=IST)
+            Shift.shift_date <= to_date
         )
     if transfer_status:
         statement = statement.where(FuelTransfer.status == transfer_status)
@@ -289,7 +294,14 @@ def _admin_transfer_rows(
             (FuelTransfer.from_vessel_id == vessel_id)
             | (FuelTransfer.to_vessel_id == vessel_id)
         )
-    transfers = db.scalars(statement.order_by(FuelTransfer.transfer_date.desc(), FuelTransfer.id.desc())).all()
+    transfer_rows = db.execute(
+        statement.order_by(Shift.shift_date.desc(), FuelTransfer.id.desc())
+    ).all()
+    transfers = [transfer for transfer, _ in transfer_rows]
+    shift_dates = {
+        transfer.id: shift_date.isoformat() if shift_date else None
+        for transfer, shift_date in transfer_rows
+    }
     vessel_ids = {value for transfer in transfers for value in (transfer.from_vessel_id, transfer.to_vessel_id)}
     transfer_ids = [transfer.id for transfer in transfers]
     ledger_entries = db.execute(
@@ -327,7 +339,7 @@ def _admin_transfer_rows(
             "id": transfer.id,
             "from_vessel": names.get(transfer.from_vessel_id, str(transfer.from_vessel_id)),
             "to_vessel": names.get(transfer.to_vessel_id, str(transfer.to_vessel_id)),
-            "transfer_date": transfer.transfer_date.isoformat() if transfer.transfer_date else None,
+            "shift_date": shift_dates.get(transfer.id),
             "initiated_quantity": str(transfer.initiated_quantity),
             "received_quantity": str(transfer.received_quantity) if transfer.received_quantity is not None else None,
             "loss_quantity": str(transfer.loss_quantity) if transfer.loss_quantity is not None else None,
@@ -368,13 +380,13 @@ def export_admin_transfer_report(
     rows = _admin_transfer_rows(db, from_date, to_date, transfer_status, vessel_id)
     output = io.StringIO(newline="")
     writer = csv.writer(output)
-    headers = ["ID", "From vessel", "To vessel", "Transfer date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark"]
+    headers = ["ID", "From vessel", "To vessel", "Shift date", "Initiated (L)", "Received (L)", "Loss (L)", "Status", "Notes", "Manager remark"]
     writer.writerow(headers)
     def safe_cell(value):
         text = "" if value is None else str(value)
         return f"'{text}" if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
 
-    fields = ("id", "from_vessel", "to_vessel", "transfer_date", "initiated_quantity", "received_quantity", "loss_quantity", "status", "notes", "manager_remark")
+    fields = ("id", "from_vessel", "to_vessel", "shift_date", "initiated_quantity", "received_quantity", "loss_quantity", "status", "notes", "manager_remark")
     quantity_fields = {"initiated_quantity", "received_quantity", "loss_quantity"}
     csv_rows = []
     for row in rows:
