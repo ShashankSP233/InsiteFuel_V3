@@ -61,6 +61,10 @@
           Dashboard
         </button>
 
+        <button class="tab-btn management-only" data-page="reports">
+          Reports
+        </button>
+
         <button class="tab-btn management-only" data-page="charts">
           Charts
         </button>
@@ -881,6 +885,46 @@
             ></div>
           </div>
 
+        </section>
+
+
+        <!-- ============================================================
+             SHIFT FUEL REPORT
+             ============================================================ -->
+
+        <section id="reports" class="tabPage hidden">
+          <div class="card">
+            <div class="section-head">
+              <span class="dot"></span>
+              Shift fuel report
+            </div>
+            <div class="grid">
+              <div>
+                <label for="shiftFuelReportFrom">From date</label>
+                <input id="shiftFuelReportFrom" type="date" />
+              </div>
+              <div>
+                <label for="shiftFuelReportTo">To date</label>
+                <input id="shiftFuelReportTo" type="date" />
+              </div>
+              <div>
+                <label for="shiftFuelReportVessel">Vessel</label>
+                <select id="shiftFuelReportVessel">
+                  <option value="">All vessels</option>
+                </select>
+              </div>
+            </div>
+            <div class="flex mt8">
+              <button class="btn btn-primary" onclick="loadShiftFuelReport()">Generate report</button>
+              <button class="btn btn-ghost" onclick="downloadShiftFuelReport('csv')">CSV</button>
+              <button class="btn btn-ghost" onclick="downloadShiftFuelReport('xlsx')">Excel</button>
+            </div>
+            <div class="note mt8">Soundings are stored as photos; numeric sounding fuel levels are not currently recorded, so that report field will be blank.</div>
+            <div id="shiftFuelReportStatus" class="note"></div>
+          </div>
+          <div class="card">
+            <div id="shiftFuelReportTable" class="table-wrap"></div>
+          </div>
         </section>
 
 

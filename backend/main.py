@@ -21,6 +21,7 @@ from backend.routes.soundings import router as soundings_router
 from backend.routes.production import router as production_router
 from backend.routes.dashboard import router as dashboard_router
 from backend.routes import export
+from backend.routes import reports
 from backend.routes.backup import router as backup_router
 
 from backend.database import SessionLocal
@@ -124,6 +125,7 @@ app.include_router(production_router)
 
 app.include_router(dashboard_router)
 app.include_router(export.router)
+app.include_router(reports.router)
 
 
 app.include_router(backup_router)

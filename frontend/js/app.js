@@ -217,6 +217,8 @@ async function init() {
   if ($("issueDate")) $("issueDate").value = today();
   $("transferReportFrom").value = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
   $("transferReportTo").value = today();
+  $("shiftFuelReportFrom").value = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
+  $("shiftFuelReportTo").value = today();
   if ($("chartFrom")) {
     $("chartFrom").value = new Date(Date.now() - 29 * 864e5)
       .toISOString()
@@ -324,6 +326,7 @@ async function loadMaster() {
   $("issueSourceVessel").insertAdjacentHTML("afterbegin", '<option value="" selected>Select source vessel</option>');
   $("transferReportVessel").innerHTML = '<option value="">All vessels</option>' +
     vessels.map((vessel) => `<option value="${vessel.id}">${esc(vessel.name)}</option>`).join("");
+  select("shiftFuelReportVessel", vessels, "name", true);
   populateFuelSources();
   select("productionVessel", vessels);
   select("soundingVessel", vessels);
@@ -1967,6 +1970,87 @@ async function loadDashboard() {
     message(e.message, "error");
   }
 }
+
+const SHIFT_FUEL_REPORT_COLUMNS = [
+  ["Vessel Name", "vessel_name", "text"],
+  ["Shift Date", "shift_date", "date"],
+  ["Shift Time (Morning/Evening)", "shift_name", "text"],
+  ["Fuel Received Quantity (L)", "fuel_received_quantity", "number"],
+  ["Fuel Received From", "fuel_received_from", "text"],
+  ["Main Engine Start Time", "main_engine_start_time", "text"],
+  ["Main Engine Close Time", "main_engine_close_time", "text"],
+  ["Main Engine Total Running H/R", "main_engine_running_hours", "number"],
+  ["Main Engine Consumption (L)", "main_engine_consumption", "number"],
+  ["AUX Engine Start Time", "aux_engine_start_time", "text"],
+  ["AUX Engine Close Time", "aux_engine_close_time", "text"],
+  ["AUX Engine Total Running H/R", "aux_engine_running_hours", "number"],
+  ["AUX Engine Consumption (L)", "aux_engine_consumption", "number"],
+  ["DG Start Time", "dg_start_time", "text"],
+  ["DG Close Time", "dg_close_time", "text"],
+  ["DG Total Running H/R", "dg_running_hours", "number"],
+  ["DG Consumption (L)", "dg_consumption", "number"],
+  ["Total F.O Consumption of the Vessel (L)", "total_vessel_fo_consumption", "number"],
+  ["Transfer Out (L)", "transfer_out_quantity", "number"],
+  ["Transfer Out Vessel", "transfer_out_vessels", "text"],
+  ["Transfer In (L)", "transfer_in_quantity", "number"],
+  ["Transfer In Vessel", "transfer_in_vessels", "text"],
+  ["Opening Fuel (L)", "opening_fuel", "number"],
+  ["Closing Fuel (L)", "closing_fuel", "number"],
+  ["Advancement (m)", "advancement_m", "number"],
+  ["Dredging Hours", "dredging_hours", "number"],
+  ["Sounding / Fuel Level (L)", "sounding_fuel_level_litres", "number"],
+  ["Remarks", "remarks", "text"],
+];
+
+function shiftFuelReportQuery() {
+  return params({
+    from_date: $("shiftFuelReportFrom").value,
+    to_date: $("shiftFuelReportTo").value,
+    vessel_id: $("shiftFuelReportVessel").value,
+  });
+}
+
+async function loadShiftFuelReport() {
+  try {
+    if (!['MANAGER', 'ADMIN'].includes(me?.role)) throw Error("Only managers and administrators can generate reports.");
+    const rows = await api(`/api/reports/shift-fuel?${shiftFuelReportQuery()}`);
+    table(
+      "shiftFuelReportTable",
+      SHIFT_FUEL_REPORT_COLUMNS.map(([header]) => header),
+      rows.map((row) => SHIFT_FUEL_REPORT_COLUMNS.map(([_, key, type]) => {
+        const value = row[key];
+        if (type === "date") return esc(value ? formatDateOnly(value) : "—");
+        if (type === "number") return esc(value == null ? "—" : fmt(value));
+        return esc(value == null || value === "" ? "—" : value);
+      })),
+    );
+    $("shiftFuelReportStatus").textContent = `${rows.length} shift record${rows.length === 1 ? "" : "s"} found.`;
+  } catch (error) {
+    $("shiftFuelReportStatus").textContent = error.message;
+    message(error.message, "error");
+  }
+}
+
+async function downloadShiftFuelReport(format) {
+  try {
+    if (!['MANAGER', 'ADMIN'].includes(me?.role)) throw Error("Only managers and administrators can export reports.");
+    const response = await fetch(`/api/reports/shift-fuel.${format}?${shiftFuelReportQuery()}`, {
+      headers: { Authorization: `Bearer ${token()}` },
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => null);
+      throw Error(detail?.detail || "Report export failed.");
+    }
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(await response.blob());
+    link.download = `shift_fuel_report.${format}`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    message(error.message, "error");
+  }
+}
+
 // ============================================================
 // FUEL ANALYTICS / CHARTS
 // ============================================================
@@ -7180,6 +7264,7 @@ document.querySelectorAll(".tab-btn").forEach((b) =>
       if (b.dataset.page === "production") await loadProduction();
       if (b.dataset.page === "soundings") await loadSoundingShift();
       if (b.dataset.page === "dashboard") await loadDashboard();
+      if (b.dataset.page === "reports") await loadShiftFuelReport();
       if (b.dataset.page === "charts") await loadCharts();
       if (b.dataset.page === "users" && me.role === "ADMIN") await loadUsers();
       if (b.dataset.page === "adminShifts" && me.role === "ADMIN") await loadAdminShifts();

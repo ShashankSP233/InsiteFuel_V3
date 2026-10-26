@@ -133,6 +133,7 @@ def get_fuel_dashboard(
     latest_closing = DashboardService.get_latest_closing_by_vessel(
         db=db,
         vessel_ids=vessel_ids,
+        to_date=to_date,
     )
 
     total_fuel = sum(
@@ -226,6 +227,7 @@ def get_dashboard_summary(
     latest_closing = DashboardService.get_latest_closing_by_vessel(
         db=db,
         vessel_ids=vessel_ids,
+        to_date=to_date,
     )
 
     total_fuel = sum(

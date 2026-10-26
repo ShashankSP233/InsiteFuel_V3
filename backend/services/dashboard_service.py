@@ -81,6 +81,7 @@ class DashboardService:
             DashboardService._get_average_daily_consumption_by_vessel(
                 db=db,
                 vessel_ids=list({shift.vessel_id for shift in shifts}),
+                to_date=to_date,
             )
         )
 
@@ -312,11 +313,12 @@ class DashboardService:
     def _get_average_daily_consumption_by_vessel(
         db: Session,
         vessel_ids: list[int],
+        to_date: date | None = None,
     ) -> dict[int, Decimal]:
         if not vessel_ids:
             return {}
 
-        to_date = now_ist().date()
+        to_date = to_date or now_ist().date()
         from_date = to_date - timedelta(days=9)
         shifts = db.scalars(
             select(Shift).where(
@@ -358,6 +360,7 @@ class DashboardService:
     def get_latest_closing_by_vessel(
         db: Session,
         vessel_ids: list[int] | None = None,
+        to_date: date | None = None,
     ) -> dict[int, Decimal]:
         """
         Return the latest available closing fuel for each
@@ -383,10 +386,12 @@ class DashboardService:
             )
         )
 
-        if vessel_ids:
+        if vessel_ids is not None:
             query = query.where(
                 Shift.vessel_id.in_(vessel_ids)
             )
+        if to_date is not None:
+            query = query.where(Shift.shift_date <= to_date)
 
         shifts = db.scalars(query).all()
 
@@ -429,12 +434,14 @@ class DashboardService:
             DashboardService._get_average_daily_consumption_by_vessel(
                 db=db,
                 vessel_ids=[vessel.id for vessel in vessels],
+                to_date=to_date,
             )
         )
 
         latest_closing = DashboardService.get_latest_closing_by_vessel(
             db=db,
             vessel_ids=[v.id for v in vessels],
+            to_date=to_date,
         )
 
         latest_opening: dict[int, Decimal] = {}
@@ -442,6 +449,7 @@ class DashboardService:
             select(Shift)
             .where(
                 Shift.vessel_id.in_([v.id for v in vessels]),
+                Shift.shift_date <= to_date,
                 Shift.calculated_closing_fuel.is_not(None),
             )
             .order_by(
@@ -902,11 +910,13 @@ class DashboardService:
         latest_closing = DashboardService.get_latest_closing_by_vessel(
             db=db,
             vessel_ids=[vessel.id for vessel, _ in vessel_records],
+            to_date=to_date,
         )
         threshold_average_by_vessel = (
             DashboardService._get_average_daily_consumption_by_vessel(
                 db=db,
                 vessel_ids=[vessel.id for vessel, _ in vessel_records],
+                to_date=to_date,
             )
         )
 
