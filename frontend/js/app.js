@@ -1964,8 +1964,10 @@ async function loadDashboard() {
         esc(x.flags.join(", ")),
       ]),
     );
+    const engineEfficiencyBlock = (label, rate, hours, consumption) =>
+      `<div class="stat-block"><div class="stat-label">${label} · L per active hour</div><div class="stat-val">${rate == null ? "—" : `${fmt(rate)} L/hr`}</div><div class="muted">${fmt(hours)} active hr · ${fmt(consumption)} L</div></div>`;
     $("efficiencyView").innerHTML =
-      `<div class="stat-row"><div class="stat-block"><div class="stat-label">Fuel consumed</div><div class="stat-val">${litres(e.total_consumption)} L</div></div><div class="stat-block"><div class="stat-label">Production</div><div class="stat-val">${f(e.total_production)} m³</div></div><div class="stat-block"><div class="stat-label">L / m³</div><div class="stat-val">${litres(e.consumption_per_unit)}</div></div></div>`;
+      `<div class="stat-row"><div class="stat-block"><div class="stat-label">Fuel consumed</div><div class="stat-val">${fmt(e.total_consumption)} L</div></div><div class="stat-block"><div class="stat-label">Production</div><div class="stat-val">${f(e.total_production)} m³</div></div><div class="stat-block"><div class="stat-label">L / m³</div><div class="stat-val">${e.consumption_per_unit == null ? "—" : fmt(e.consumption_per_unit)}</div></div>${engineEfficiencyBlock("Main Engine", e.main_engine_l_per_hour, e.main_engine_running_hours, e.main_engine_consumption)}${engineEfficiencyBlock("AUX Engine", e.aux_engine_l_per_hour, e.aux_engine_running_hours, e.aux_engine_consumption)}${engineEfficiencyBlock("DG", e.dg_l_per_hour, e.dg_running_hours, e.dg_consumption)}<div class="stat-block"><div class="stat-label">All engines · L per active hour</div><div class="stat-val">${e.total_l_per_engine_hour == null ? "—" : `${fmt(e.total_l_per_engine_hour)} L/hr`}</div><div class="muted">${fmt(e.total_engine_running_hours)} combined engine hr</div></div></div>`;
   } catch (e) {
     message(e.message, "error");
   }

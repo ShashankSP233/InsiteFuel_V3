@@ -308,6 +308,7 @@ def get_fuel_efficiency(
     from_date: date | None = Query(None),
     to_date: date | None = Query(None),
     vessel_id: int | None = Query(None),
+    shift_name: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -322,6 +323,7 @@ def get_fuel_efficiency(
         from_date=from_date,
         to_date=to_date,
         vessel_id=vessel_id,
+        shift_name=shift_name,
     )
 
 

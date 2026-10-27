@@ -639,6 +639,7 @@ class DashboardService:
         from_date: date,
         to_date: date,
         vessel_id: int | None = None,
+        shift_name: str | None = None,
     ) -> dict:
         if from_date > to_date:
             raise ValueError("from_date cannot be later than to_date.")
@@ -653,7 +654,14 @@ class DashboardService:
                 Shift.vessel_id == vessel_id
             )
 
+        if shift_name is not None:
+            normalized_shift = shift_name.strip().upper()
+            if normalized_shift not in {"MORNING", "EVENING"}:
+                raise ValueError("shift_name must be MORNING or EVENING.")
+            shift_query = shift_query.where(Shift.shift_name == normalized_shift)
+
         shifts = db.scalars(shift_query).all()
+        shift_ids = [shift.id for shift in shifts]
 
         total_consumption = ZERO
 
@@ -676,6 +684,9 @@ class DashboardService:
             production_query = production_query.where(
                 ProductionRecord.vessel_id == vessel_id
             )
+        production_query = production_query.where(
+            ProductionRecord.shift_id.in_(shift_ids)
+        )
 
         production_records = db.scalars(
             production_query
@@ -696,10 +707,73 @@ class DashboardService:
                 total_consumption / total_production
             )
 
+        engine_usage = {
+            "ME": {"running_hours": ZERO, "consumption": ZERO},
+            "AUX": {"running_hours": ZERO, "consumption": ZERO},
+            "DG": {"running_hours": ZERO, "consumption": ZERO},
+        }
+        if shift_ids:
+            engine_rows = db.execute(
+                select(EngineEvent, Equipment.equipment_type)
+                .join(Equipment, Equipment.id == EngineEvent.equipment_id)
+                .where(EngineEvent.shift_id.in_(shift_ids))
+            ).all()
+            for event, equipment_type in engine_rows:
+                engine_type = str(equipment_type or event.engine_type or "").upper()
+                if engine_type not in engine_usage:
+                    continue
+
+                running_hours = event.hours_run
+                if running_hours is None and event.stop_time is not None:
+                    try:
+                        running_hours = Decimal(
+                            str((event.stop_time - event.start_time).total_seconds())
+                        ) / Decimal("3600")
+                    except TypeError:
+                        running_hours = ZERO
+
+                engine_usage[engine_type]["running_hours"] += Decimal(
+                    str(running_hours or 0)
+                )
+                engine_usage[engine_type]["consumption"] += Decimal(
+                    str(event.consumption or 0)
+                )
+
+        total_engine_running_hours = sum(
+            (data["running_hours"] for data in engine_usage.values()),
+            ZERO,
+        )
+
+        def consumption_rate(consumption: Decimal, hours: Decimal) -> Decimal | None:
+            return consumption / hours if hours > ZERO else None
+
         return {
             "total_consumption": total_consumption,
             "total_production": total_production,
             "consumption_per_unit": consumption_per_unit,
+            "main_engine_running_hours": engine_usage["ME"]["running_hours"],
+            "main_engine_consumption": engine_usage["ME"]["consumption"],
+            "main_engine_l_per_hour": consumption_rate(
+                engine_usage["ME"]["consumption"],
+                engine_usage["ME"]["running_hours"],
+            ),
+            "aux_engine_running_hours": engine_usage["AUX"]["running_hours"],
+            "aux_engine_consumption": engine_usage["AUX"]["consumption"],
+            "aux_engine_l_per_hour": consumption_rate(
+                engine_usage["AUX"]["consumption"],
+                engine_usage["AUX"]["running_hours"],
+            ),
+            "dg_running_hours": engine_usage["DG"]["running_hours"],
+            "dg_consumption": engine_usage["DG"]["consumption"],
+            "dg_l_per_hour": consumption_rate(
+                engine_usage["DG"]["consumption"],
+                engine_usage["DG"]["running_hours"],
+            ),
+            "total_engine_running_hours": total_engine_running_hours,
+            "total_l_per_engine_hour": consumption_rate(
+                total_consumption,
+                total_engine_running_hours,
+            ),
         }
 
 

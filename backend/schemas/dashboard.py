@@ -106,6 +106,17 @@ class FuelEfficiencyResponse(BaseModel):
     total_consumption: Decimal
     total_production: Decimal
     consumption_per_unit: Decimal | None = None
+    main_engine_running_hours: Decimal
+    main_engine_consumption: Decimal
+    main_engine_l_per_hour: Decimal | None = None
+    aux_engine_running_hours: Decimal
+    aux_engine_consumption: Decimal
+    aux_engine_l_per_hour: Decimal | None = None
+    dg_running_hours: Decimal
+    dg_consumption: Decimal
+    dg_l_per_hour: Decimal | None = None
+    total_engine_running_hours: Decimal
+    total_l_per_engine_hour: Decimal | None = None
 
 class MissingSoundingItem(BaseModel):
     vessel_id: int
