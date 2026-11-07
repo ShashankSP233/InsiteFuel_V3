@@ -19,6 +19,7 @@ ALLOWED_VESSEL_TYPES = {
     "Fiber Boat",
     "Dredge Pump Boat",
     "Tanker",
+    "Hopper Barge",
 }
 
 

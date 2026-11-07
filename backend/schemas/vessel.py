@@ -14,6 +14,7 @@ VesselType = Literal[
     "Fiber Boat",
     "Dredge Pump Boat",
     "Tanker",
+    "Hopper Barge",
 ]
 
 
